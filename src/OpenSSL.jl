@@ -363,20 +363,13 @@ function on_bio_ctrl(bio::BIO, cmd::BIOCtrl, num::Int64, ptr::Ptr{Cvoid})::Int64
     return 1
 end
 
-const on_bio_create_ptr = @cfunction on_bio_create Cint (BIO,)
-const on_bio_destroy_ptr = @cfunction on_bio_destroy Cint (BIO,)
-const on_bio_read_ptr = @cfunction on_bio_read Cint (BIO, Ptr{Cchar}, Cint)
-const on_bio_write_ptr = @cfunction on_bio_write Cint (BIO, Ptr{Cchar}, Cint)
-const on_bio_puts_ptr = @cfunction on_bio_puts Cint (BIO, Ptr{Cchar})
-const on_bio_ctrl_ptr = @cfunction on_bio_ctrl Int64 (BIO, BIOCtrl, Int64, Ptr{Cvoid})
-
 """
     BIO write
 """
 function Base.unsafe_write(bio::BIO, out_buffer::Ptr{UInt8}, out_length::Int)
     println("==> bio_unsafe_write: $(bio) ptr:$(out_buffer) len:$(out_length)")
 
-    result = ccall((:BIO_write, libssl),
+    result = ccall((:BIO_write, libcrypto),
         Cint,
         (BIO, Ptr{Cvoid}, Cint),
         bio,
@@ -414,39 +407,37 @@ mutable struct BIOMethod
             Cint,
             (Ptr{Cvoid}, Ptr{Cvoid}),
             bio_meth,
-            on_bio_create_ptr)
+            OPEN_SSL_INIT.x.on_bio_create_ptr)
 
         result = ccall((:BIO_meth_set_destroy, libcrypto),
             Cint,
             (Ptr{Cvoid}, Ptr{Cvoid}),
             bio_meth,
-            on_bio_destroy_ptr)
+            OPEN_SSL_INIT.x.on_bio_destroy_ptr)
 
         result = ccall((:BIO_meth_set_read, libcrypto),
             Cint,
             (Ptr{Cvoid}, Ptr{Cvoid}),
             bio_meth,
-            on_bio_read_ptr)
+            OPEN_SSL_INIT.x.on_bio_read_ptr)
 
         result = ccall((:BIO_meth_set_write, libcrypto),
             Cint,
             (Ptr{Cvoid}, Ptr{Cvoid}),
             bio_meth,
-            on_bio_write_ptr)
+            OPEN_SSL_INIT.x.on_bio_write_ptr)
 
         result = ccall((:BIO_meth_set_puts, libcrypto),
             Cint,
             (Ptr{Cvoid}, Ptr{Cvoid}),
             bio_meth,
-            on_bio_puts_ptr)
-        @show result
+            OPEN_SSL_INIT.x.on_bio_puts_ptr)
 
         result = ccall((:BIO_meth_set_ctrl, libcrypto),
             Cint,
             (Ptr{Cvoid}, Ptr{Cvoid}),
             bio_meth,
-            on_bio_ctrl_ptr)
-        println("after 3")
+            OPEN_SSL_INIT.x.on_bio_ctrl_ptr)
 
 """
     BIO_meth_set_create(methods_bufferevent, bio_bufferevent_new);
@@ -460,7 +451,7 @@ end
     Creates a file descriptor BIO method.
 """
 function BIOMethod_fd()::BIOMethod
-    bio_meth = ccall((:BIO_s_fd, libssl),
+    bio_meth = ccall((:BIO_s_fd, libcrypto),
         Ptr{Cvoid},
         ())
 
@@ -471,7 +462,7 @@ end
     Cretes a memory BIO method.
 """
 function BIOMethod_mem()::BIOMethod
-    bio_meth = ccall((:BIO_s_mem, libssl),
+    bio_meth = ccall((:BIO_s_mem, libcrypto),
         Ptr{Cvoid},
         ())
 
@@ -480,7 +471,7 @@ end
 
 function free(bioMethod::BIOMethod)
     println("free BIOMethod")
-    ccall((:BIO_meth_free, libssl),
+    ccall((:BIO_meth_free, libcrypto),
             Ptr{Cvoid},
             (BIOMethod,),
             bioMethod)
@@ -493,21 +484,11 @@ end
 function BIO(io::IO)
     println("new BIO $(io)")
 
-    ## gc collects[FIXME]
-    bio_method::BIOMethod = OPEN_SSL_INIT.x.bio_io_method
-
-    println(" new BIO $(bio_method)")
-    println(" before BIO_new")
-
     bio =  ccall((:BIO_new, libcrypto),
         Ptr{Cvoid},
         (BIOMethod,),
-        bio_method)
-    println(" after 5.2")
-
+        BIO_METHOD.x)
     bio = BIO(bio)
-
-    println(" after 6")
 
     # Store in the lookup table.
     bio_id = store!(BIO_IO, io)
@@ -532,7 +513,7 @@ function BIO(io::IO)
         bio,
         0)
 
-    println("$(bio) $(bio_method) $(bio_id)")
+    println("$(bio) $(bio_id)")
     return bio
 end
 
@@ -828,7 +809,7 @@ end
     X509Name to string.
 """
 function string(x509_name::X509Name)::String
-    name_ptr = ccall((:X509_NAME_oneline, libssl),
+    name_ptr = ccall((:X509_NAME_oneline, libcrypto),
         Cstring,
         (X509Name, Ptr{UInt8}, Cint,),
         x509_name,
@@ -837,7 +818,7 @@ function string(x509_name::X509Name)::String
 
     str = unsafe_string(name_ptr)
 
-    name_ptr = ccall((:CRYPTO_free, libssl),
+    name_ptr = ccall((:CRYPTO_free, libcrypto),
         Cvoid,
         (Cstring,),
         name_ptr)
@@ -870,7 +851,7 @@ mutable struct X509Certificate
         bio = BIO(OpenSSL.BIOMethod_mem())
         unsafe_write(bio, pointer(in_string), length(in_string))
 
-        x509 = ccall((:PEM_read_bio_X509, libssl),
+        x509 = ccall((:PEM_read_bio_X509, libcrypto),
             Ptr{Cvoid},
             (BIO, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}),
             bio,
@@ -888,7 +869,7 @@ end
 function free(x509_cert::X509Certificate)
     println("free $(x509_cert)")
 
-    ccall((:X509_free, libssl),
+    ccall((:X509_free, libcrypto),
             Ptr{Cvoid},
             (X509Certificate,),
             x509_cert)
@@ -896,7 +877,7 @@ function free(x509_cert::X509Certificate)
 end
 
 function get_subject_name(x509_cert::X509Certificate)
-    x509_name = ccall((:X509_get_subject_name, libssl),
+    x509_name = ccall((:X509_get_subject_name, libcrypto),
         Ptr{Cvoid},
         (X509Certificate,),
         x509_cert)
@@ -913,7 +894,12 @@ end
 """
 mutable struct OpenSSLInit
     result::Bool
-    bio_io_method::BIOMethod
+    on_bio_create_ptr::Ptr{Nothing}
+    on_bio_destroy_ptr::Ptr{Nothing}
+    on_bio_read_ptr::Ptr{Nothing}
+    on_bio_write_ptr::Ptr{Nothing}
+    on_bio_puts_ptr::Ptr{Nothing}
+    on_bio_ctrl_ptr::Ptr{Nothing}
 
     function OpenSSLInit()
         println("=> [OpenSSL Init]")
@@ -932,13 +918,27 @@ mutable struct OpenSSLInit
             C_NULL)
             @show result
 
-        bio_io_method = BIOMethod("BIO_TYPE_LIBEVENT")
-
-        return new(result, bio_io_method)
+        # Callbacks
+        on_bio_create_ptr = @cfunction on_bio_create Cint (BIO,)
+        on_bio_destroy_ptr = @cfunction on_bio_destroy Cint (BIO,)
+        on_bio_read_ptr = @cfunction on_bio_read Cint (BIO, Ptr{Cchar}, Cint)
+        on_bio_write_ptr = @cfunction on_bio_write Cint (BIO, Ptr{Cchar}, Cint)
+        on_bio_puts_ptr = @cfunction on_bio_puts Cint (BIO, Ptr{Cchar})
+        on_bio_ctrl_ptr = @cfunction on_bio_ctrl Int64 (BIO, BIOCtrl, Int64, Ptr{Cvoid})
+        
+        return new(
+            result,
+            on_bio_create_ptr,
+            on_bio_destroy_ptr,
+            on_bio_read_ptr,
+            on_bio_write_ptr,
+            on_bio_puts_ptr,
+            on_bio_ctrl_ptr)
     end
 end
 
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()
+const BIO_METHOD = Ref{BIOMethod}()
 
 """
     Initalize module.
@@ -946,6 +946,8 @@ const OPEN_SSL_INIT = Ref{OpenSSLInit}()
 function __init__()
     println("$(@__MODULE__)::__init")
     OPEN_SSL_INIT.x = OpenSSLInit()
+    BIO_METHOD.x = BIOMethod("BIO_TYPE_LIBEVENT")
+
     @show get_error()
 end
 
