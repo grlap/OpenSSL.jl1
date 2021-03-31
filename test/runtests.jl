@@ -3,11 +3,16 @@ using OpenSSL
 using Sockets
 using MozillaCACerts_jll
 
-println("Testing...")
-
-
-using Sockets
-using StringEncodings
+# Verifies calling into OpenSSL library.
+@testset "OpenSSL" begin
+    @test OpenSSL.OPEN_SSL_INIT.x.result == 1
+    @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_create_ptr != C_NULL
+    @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_destroy_ptr != C_NULL
+    @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_read_ptr != C_NULL
+    @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_write_ptr != C_NULL
+    @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_puts_ptr != C_NULL
+    @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_ctrl_ptr != C_NULL
+end
 
 file_handle = open(MozillaCACerts_jll.cacert)
 pem = String(read(file_handle))
