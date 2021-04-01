@@ -19,50 +19,6 @@ const HTTP2_ALPN = "\x02h2"
 const UPDATE_HTTP2_ALPN = "\x02h2\x08http/1.1"
 
 """
-    Lookup dictionary.
-    Used to locate the Julia objects from C handlers.
-"""
-struct LookupDictionary{V}
-    dictionary::Dict{Int64, V}
-    lock::ReentrantLock
-    id_counter::Threads.Atomic{Int64}
-
-    function LookupDictionary{V}() where V
-        println("LookupDictionary")
-        return new(Dict{Int64, V}(), ReentrantLock(), Threads.Atomic{Int64}(1))
-    end
-end
-
-"""
-    Stores the object in the dictionary.
-"""
-function store!(lookup::LookupDictionary{V}, element::V)::Int64 where V
-    element_id::Int64 = Threads.atomic_add!(lookup.id_counter, 1)
-
-    lock(lookup.lock) do
-        lookup.dictionary[element_id] = element
-    end
-
-    return element_id
-end
-
-"""
-    Gets the element from the dictionary.
-"""
-function get(lookup::LookupDictionary{V}, user_data::Ptr{Cvoid})::Option{V} where V
-    element_id::Int64 = Int64(user_data)
-
-    lock(lookup.lock) do
-        if (haskey(lookup.dictionary, element_id))
-            element = lookup.dictionary[element_id]
-            return element
-        else
-            return nothing
-        end
-    end
-end
-
-"""
     These are used in the following macros and are passed to BIO_ctrl().
 """
 @enum(BIOCtrl::Cint,
@@ -278,22 +234,40 @@ mutable struct BIO
     bio::Ptr{Cvoid}
 end
 
-function get_data(bio::BIO)::Ptr{Cvoid}
-    bio_id = ccall((:BIO_get_data, libcrypto),
+"""
+    BIOStream.
+"""
+mutable struct BIOStream <: IO
+    bio::BIO
+    io::Option{IO}
+
+    BIOStream(bio::BIO) = new(bio, nothing)
+
+    BIOStream(bio::BIO, io::IO) = new(bio, io)
+end
+
+function bio_stream_set_data(bio_stream::BIOStream)
+    println("bio_stream_set_data $(bio_stream) $(pointer_from_objref(bio_stream))")
+    ccall((:BIO_set_data, libcrypto),
+        Cvoid,
+        (BIO, Ptr{Cvoid},),
+        bio_stream.bio,
+        pointer_from_objref(bio_stream))
+end
+
+function bio_stream_from_data(bio::BIO)::BIOStream
+    user_data::Ptr{Cvoid} = ccall((:BIO_get_data, libcrypto),
         Ptr{Cvoid},
         (BIO,),
         bio)
-    return Ptr{Cvoid}(bio_id)
+    println("bio_stream_from_data $(bio) $(user_data)")
+
+    bio_stream::BIOStream = unsafe_pointer_to_objref(user_data)
+
+    println("after cast: $(bio_stream)")
+
+    return bio_stream
 end
-
-"""
-    #TODO
-"""
-mutable struct BIOStream{S <: IO} <: IO
-
-end
-
-const BIO_IO = LookupDictionary{IO}()
 
 """
     BIO Stream callbacks.
@@ -329,25 +303,26 @@ end
 function on_bio_stream_read(bio::BIO, out::Ptr{Cchar}, outlen::Cint)::Cint
     println("on_bio_stream_read $(bio) out_buffer:$(out) out_length:$(outlen)")
 
-    io = get(BIO_IO, get_data(bio))
-    eof(io)
-    available_bytes = bytesavailable(io)
+    bio_stream = bio_stream_from_data(bio)
+    eof(bio_stream.io)
+    available_bytes = bytesavailable(bio_stream.io)
 
     println("available to read: $(available_bytes)")
     outlen = min(outlen, available_bytes)
 
-    unsafe_read(io, out, outlen)
-    println("read from: $(io) in_buffer:$(out) in_length:$(outlen)")
+    unsafe_read(bio_stream.io, out, outlen)
+    println("read from: $(bio_stream.io) in_buffer:$(out) in_length:$(outlen)")
 
     return outlen
 end
 
 function on_bio_stream_write(bio::BIO, in::Ptr{Cchar}, inlen::Cint)::Cint
-    println("on_bio_stream_write $(bio) id:$(get_data(bio))")
+    println("on_bio_stream_write $(bio)")
 
-    io = get(BIO_IO, get_data(bio))
-    written = unsafe_write(io, in, inlen)
-    println("written: $(written) to: $(io) in_buffer:$(in) in_length:$(inlen)")
+    bio_stream = bio_stream_from_data(bio)
+
+    written = unsafe_write(bio_stream.io, in, inlen)
+    println("written: $(written) to: $(bio_stream.io) in_buffer:$(in) in_length:$(inlen)")
 
     return Cint(written)
 end
@@ -489,15 +464,11 @@ function BIO(io::IO)
         BIO_STREAM_METHOD.x)
     bio = BIO(bio)
 
-    # Store in the lookup table.
-    bio_id = store!(BIO_IO, io)
-
-    # Store the lookup id in the OpenSSL bio object.
     ccall((:BIO_set_data, libcrypto),
         Cvoid,
         (BIO, Ptr{Cvoid}),
         bio,
-        Ptr{Cvoid}(bio_id))
+        C_NULL)
 
     # Mark BIO as initalized.
     ccall((:BIO_set_init, libcrypto),
@@ -512,7 +483,7 @@ function BIO(io::IO)
         bio,
         0)
 
-    println("$(bio) $(bio_id)")
+    println("$(bio)")
     return bio
 end
 
@@ -531,9 +502,9 @@ end
 
 function verify(bio::BIO)
     println("verify: $(bio)")
+    bio_stream = bio_stream_from_data(bio)
 
-    looked_up_bio = get(BIO_IO, get_data(bio))
-    return bio == looked_up_bio
+    return bio == bio_stream.bio
 end
 
 """
@@ -628,7 +599,7 @@ mutable struct SSL
     end
 end
 
-function connect(ssl::SSL)::Cint
+function ssl_connect(ssl::SSL)::Cint
     result = ccall((:SSL_connect, libssl),
         Cint,
         (SSL,),
@@ -667,28 +638,42 @@ end
 """
 struct SSLStream <: IO
     ssl::SSL
+    ssl_context::SSLContext
+    bio_read_stream::BIOStream
+    bio_write_stream::BIOStream
     lock::ReentrantLock
 
-    SSLStream(ssl::SSL) = new(ssl, ReentrantLock())
+    function SSLStream(ssl_context::SSLContext, bio_stream_read::BIOStream, bio_stream_write::BIOStream)
+        ssl = SSL(ssl_context, bio_stream_read.bio, bio_stream_write.bio)
+
+        return new(ssl, ssl_context, bio_stream_read, bio_stream_write, ReentrantLock())
+    end
 end
 
 """
     Force read operation on the stream. This will update the pending bytes.
 """
 function force_read_buffer(ssl_stream::SSLStream)
-    has_pending = ccall((:SSL_has_pending, libssl),
-        Cint,
-        (SSL,),
-        ssl_stream.ssl)
+    bio_read_stream = ssl_stream.bio_read_stream
+    bio_write_stream = ssl_stream.bio_write_stream
+    GC.@preserve bio_read_stream bio_write_stream begin
+        bio_stream_set_data(bio_read_stream)
+        bio_stream_set_data(bio_write_stream)
 
-    # If there is no data in the buffer, peek and force the first read.
-    in_buffer = Vector{UInt8}(undef, 1)
-    read_count = ccall((:SSL_peek, libssl),
-        Cint,
-        (SSL, Ptr{Int8}, Cint),
-        ssl_stream.ssl,
-        pointer(in_buffer),
-        length(in_buffer))
+        has_pending = ccall((:SSL_has_pending, libssl),
+            Cint,
+            (SSL,),
+            ssl_stream.ssl)
+
+        # If there is no data in the buffer, peek and force the first read.
+        in_buffer = Vector{UInt8}(undef, 1)
+        read_count = ccall((:SSL_peek, libssl),
+            Cint,
+            (SSL, Ptr{Int8}, Cint),
+            ssl_stream.ssl,
+            pointer(in_buffer),
+            length(in_buffer))
+    end
 end
 
 function Base.unsafe_write(ssl_stream::SSLStream, in_buffer::Ptr{UInt8}, in_length::UInt)
@@ -696,15 +681,37 @@ function Base.unsafe_write(ssl_stream::SSLStream, in_buffer::Ptr{UInt8}, in_leng
 
     write_count::Int = 0
 
-    write_count = ccall((:SSL_write, libssl),
-        Cint,
-        (SSL, Ptr{Cvoid}, Cint),
-        ssl_stream.ssl,
-        in_buffer,
-        in_length)
+    bio_read_stream = ssl_stream.bio_read_stream
+    bio_write_stream = ssl_stream.bio_write_stream
+    GC.@preserve bio_read_stream bio_write_stream begin
+        bio_stream_set_data(bio_read_stream)
+        bio_stream_set_data(bio_write_stream)
+
+        write_count = ccall((:SSL_write, libssl),
+            Cint,
+            (SSL, Ptr{Cvoid}, Cint),
+            ssl_stream.ssl,
+            in_buffer,
+            in_length)
+    end
 
     println("<== ssl_unsafe_write: $(ssl_stream) written:$(write_count)")
     return write_count
+end
+
+function connect(ssl_stream::SSLStream)
+    println("==> connect: $(ssl_stream)")
+
+    write_count::Int = 0
+
+    bio_read_stream = ssl_stream.bio_read_stream
+    bio_write_stream = ssl_stream.bio_write_stream
+    GC.@preserve bio_read_stream bio_write_stream begin
+        bio_stream_set_data(bio_read_stream)
+        bio_stream_set_data(bio_write_stream)
+
+        return ssl_connect(ssl_stream.ssl)
+    end
 end
 
 """
@@ -719,8 +726,53 @@ function Base.read(ssl_stream::SSLStream)::Vector{UInt8}
     lock(ssl_stream.lock) do
         println("  => Base.read =>")
 
-        # Force first read, that will update the pending bytes.
-        force_read_buffer(ssl_stream)
+        bio_read_stream = ssl_stream.bio_read_stream
+        bio_write_stream = ssl_stream.bio_write_stream
+        GC.@preserve bio_read_stream bio_write_stream begin
+            bio_stream_set_data(bio_read_stream)
+            bio_stream_set_data(bio_write_stream)
+
+            # Force first read, that will update the pending bytes.
+            force_read_buffer(ssl_stream)
+
+            has_pending = ccall((:SSL_has_pending, libssl),
+                Cint,
+                (SSL,),
+                ssl_stream.ssl)
+
+            pending_count = ccall((:SSL_pending, libssl),
+                Cint,
+                (SSL,),
+                ssl_stream.ssl)
+
+            # Allocate read buffer and copy the data to it.
+            read_buffer = Vector{UInt8}(undef, pending_count)
+
+            if (pending_count != 0)
+                read_count = ccall((:SSL_read, libssl),
+                    Cint,
+                    (SSL, Ptr{Int8}, Cint),
+                    ssl_stream.ssl,
+                    pointer(read_buffer),
+                    pending_count)
+
+                resize!(read_buffer, read_count)
+            end
+
+            return read_buffer
+        end
+    end
+end
+
+function Base.bytesavailable(ssl_stream::SSLStream)::Cint
+    println("=> bytesavailable ssl_stream")
+    force_read_buffer(ssl_stream)
+
+    bio_read_stream = ssl_stream.bio_read_stream
+    bio_write_stream = ssl_stream.bio_write_stream
+    GC.@preserve bio_read_stream bio_write_stream begin
+        bio_stream_set_data(bio_read_stream)
+        bio_stream_set_data(bio_write_stream)
 
         has_pending = ccall((:SSL_has_pending, libssl),
             Cint,
@@ -732,56 +784,33 @@ function Base.read(ssl_stream::SSLStream)::Vector{UInt8}
             (SSL,),
             ssl_stream.ssl)
 
-        # Allocate read buffer and copy the data to it.
-        read_buffer = Vector{UInt8}(undef, pending_count)
+        println("<<= bytesavailable ssl_stream $(pending_count)")
 
-        if (pending_count != 0)
-            read_count = ccall((:SSL_read, libssl),
-                Cint,
-                (SSL, Ptr{Int8}, Cint),
-                ssl_stream.ssl,
-                pointer(read_buffer),
-                pending_count)
-
-            resize!(read_buffer, read_count)
-        end
-
-        return read_buffer
+        return pending_count
     end
-end
-
-function Base.bytesavailable(ssl_stream::SSLStream)::Cint
-    println("=> bytesavailable ssl_stream")
-    force_read_buffer(ssl_stream)
-
-    has_pending = ccall((:SSL_has_pending, libssl),
-        Cint,
-        (SSL,),
-        ssl_stream.ssl)
-
-    pending_count = ccall((:SSL_pending, libssl),
-        Cint,
-        (SSL,),
-        ssl_stream.ssl)
-
-    println("<<= bytesavailable ssl_stream $(pending_count)")
-
-    return pending_count
 end
 
 function Base.eof(ssl_stream::SSLStream)::Bool
     println("==> eof ssl_stream")
-    force_read_buffer(ssl_stream)
 
-    has_pending = ccall((:SSL_has_pending, libssl),
-        Cint,
-        (SSL,),
-        ssl_stream.ssl)
+    bio_read_stream = ssl_stream.bio_read_stream
+    bio_write_stream = ssl_stream.bio_write_stream
+    GC.@preserve bio_read_stream bio_write_stream begin
+        bio_stream_set_data(bio_read_stream)
+        bio_stream_set_data(bio_write_stream)
 
-    result = has_pending == 0
-    println("<== eof ssl_stream $(has_pending)")
+        force_read_buffer(ssl_stream)
 
-    return result
+        has_pending = ccall((:SSL_has_pending, libssl),
+            Cint,
+            (SSL,),
+            ssl_stream.ssl)
+
+        result = has_pending == 0
+        println("<== eof ssl_stream $(has_pending)")
+
+        return result
+    end
 end
 
 """

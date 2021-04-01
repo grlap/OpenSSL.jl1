@@ -14,6 +14,7 @@ using MozillaCACerts_jll
     @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_ctrl_ptr != C_NULL
 end
 
+function test()
 file_handle = open(MozillaCACerts_jll.cacert)
 pem = String(read(file_handle))
 close(file_handle)
@@ -27,6 +28,7 @@ x509_cert = OpenSSL.X509Certificate(cert)
 x509_name = OpenSSL.get_subject_name(x509_cert)
 @show x509_name
 @show OpenSSL.string(x509_name)
+end
 
 
 #@show OpenSSL.__init__()
@@ -36,14 +38,18 @@ cs = connect("www.nghttp2.org", 443)
 ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
 result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
-bio_read_write = OpenSSL.BIO(cs)
-
-ssl = OpenSSL.SSL(ssl_ctx, bio_read_write, bio_read_write)
-@show result = OpenSSL.connect(ssl)
-@show OpenSSL.get_error()
+#ssl = OpenSSL.SSL(ssl_ctx, bio_read_write, bio_read_write)
+#@show OpenSSL.get_error()
 
 # Create SSL stream.
-ssl_stream = SSLStream(ssl)
+# #CHECK single BIO can be reused by multiple BIOStream
+
+bio_read_write = OpenSSL.BIO(cs)
+bio_stream = OpenSSL.BIOStream(bio_read_write, cs)
+ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
+
+# TODO expose connect
+@show result = OpenSSL.connect(ssl_stream)
 
 r = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
 
@@ -51,8 +57,8 @@ r = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\
 
 written = unsafe_write(ssl_stream, pointer(r), length(r))
 
-@show eof(cs)
-@show bytesavailable(cs)
+@show eof(ssl_stream)
+@show bytesavailable(ssl_stream)
 #@show eof(ssl_stream)
 #@show bytesavailable(ssl_stream)
 res = read(ssl_stream)
