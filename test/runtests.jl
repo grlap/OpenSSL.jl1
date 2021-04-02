@@ -33,35 +33,40 @@ end
 
 #@show OpenSSL.__init__()
 
-cs = connect("www.nghttp2.org", 443)
+@testset "HttpsConnect" begin
+    tcp_stream = connect("www.nghttp2.org", 443)
 
-ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
-result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
+    result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
-#ssl = OpenSSL.SSL(ssl_ctx, bio_read_write, bio_read_write)
-#@show OpenSSL.get_error()
+    # Create SSL stream.
+    # #CHECK single BIO can be reused by multiple BIOStream
 
-# Create SSL stream.
-# #CHECK single BIO can be reused by multiple BIOStream
+    bio_stream = OpenSSL.BIOStream(tcp_stream)
+    ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
 
-bio_read_write = OpenSSL.BIO(cs)
-bio_stream = OpenSSL.BIOStream(bio_read_write, cs)
-ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
+    # TODO expose connect
+    @show result = OpenSSL.connect(ssl_stream)
 
-# TODO expose connect
-@show result = OpenSSL.connect(ssl_stream)
+    x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
+    @show x509_server_cert
 
-r = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
+    @test x509_server_cert.issuer_name == "/C=US/O=Let's Encrypt/CN=R3"
+    @test x509_server_cert.subject_name == "/CN=nghttp2.org"
 
-#ssl_stream = connect("www.nghttp2.org", 80)
+    r = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
 
-written = unsafe_write(ssl_stream, pointer(r), length(r))
+    #ssl_stream = connect("www.nghttp2.org", 80)
 
-@show eof(ssl_stream)
-@show bytesavailable(ssl_stream)
-#@show eof(ssl_stream)
-#@show bytesavailable(ssl_stream)
-res = read(ssl_stream)
-@show String(res)
-# Htt
+    written = unsafe_write(ssl_stream, pointer(r), length(r))
+
+    @show eof(ssl_stream)
+    @show bytesavailable(ssl_stream)
+    #@show eof(ssl_stream)
+    #@show bytesavailable(ssl_stream)
+    res = read(ssl_stream)
+    @show String(res)
+    # Htt
+end
+
 
