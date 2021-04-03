@@ -1,6 +1,7 @@
 module OpenSSL
 
 using OpenSSL_jll
+using Sockets
 using BitFlags
 
 """
@@ -10,7 +11,7 @@ using BitFlags
 """
 
 export TLSv12ClientMethod, SSLStream,
-    eof, bytesavailable, read, unsafe_write,
+    eof, bytesavailable, read, unsafe_write, connect,
     get_peer_certificate,
     HTTP2_ALPN, UPDATE_HTTP2_ALPN
 
@@ -799,7 +800,7 @@ function Base.unsafe_write(ssl_stream::SSLStream, in_buffer::Ptr{UInt8}, in_leng
     return write_count
 end
 
-function connect(ssl_stream::SSLStream)
+function Sockets.connect(ssl_stream::SSLStream)
     println("==> connect: $(ssl_stream)")
 
     write_count::Int = 0
