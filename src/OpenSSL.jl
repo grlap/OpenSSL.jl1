@@ -8,6 +8,8 @@ using BitFlags
     [ ] Free BIO
     [ ] Free BIOMethod
     [ ] BIO_IO or BIO_JuliaIO, BIOStream method (callbacks)
+    [x] Store the SSLContext
+        part of SSLStream
 """
 
 export TLSv12ClientMethod, SSLStream,
@@ -606,7 +608,6 @@ function get_error()::Int64
 
     return result
 end
-
 
 """
     X509 Name.
