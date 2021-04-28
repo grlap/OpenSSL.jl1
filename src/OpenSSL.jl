@@ -543,7 +543,6 @@ function set_alpn(ssl_context::SSLContext, protocol_list::String)
 end
 
 function free(ssl_context::SSLContext)
-    println("free $(ssl_context)")
     ccall((:SSL_CTX_free, libssl),
             Ptr{Cvoid},
             (SSLContext,),
@@ -617,8 +616,6 @@ mutable struct X509Name
 end
 
 function free(x509_name::X509Name)
-    println("free $(x509_name)")
-
     ccall((:X509_NAME_free, libssl),
         Cvoid,
         (X509Name,),
@@ -693,8 +690,6 @@ mutable struct X509Certificate
 end
 
 function free(x509_cert::X509Certificate)
-    println("free $(x509_cert)")
-
     ccall((:X509_free, libcrypto),
             Ptr{Cvoid},
             (X509Certificate,),
