@@ -12,7 +12,7 @@ using BitFlags
         part of SSLStream
 """
 
-export TLSv12ClientMethod, SSLStream,
+export TLSv12ClientMethod, SSLStream, BigNum,
     eof, bytesavailable, read, unsafe_write, connect,
     get_peer_certificate,
     HTTP2_ALPN, UPDATE_HTTP2_ALPN
@@ -232,6 +232,172 @@ end
 const OPENSSL_INIT_SSL_DEFAULT = (OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS)
 
 """
+    OpenSSL exception.
+"""
+mutable struct OpenSSLException <: Exception
+    OpenSSLException() = new()
+end
+
+"""
+"""
+mutable struct BigNumContext
+    bn_ctx::Ptr{Cvoid}
+
+    function BigNumContext()
+        big_num_contex = ccall((:BN_CTX_secure_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+        if big_num_contex == C_NULL
+            throw(OpenSSLException())
+        end
+
+        big_num_contex = new(big_num_contex)
+
+        finalizer(free, big_num_contex)
+        return big_num_contex
+    end
+end
+
+function free(big_num_contex::BigNumContext)
+    ccall((:BN_CTX_free, libcrypto),
+            Ptr{Cvoid},
+            (BigNumContext,),
+            big_num_contex)
+
+    big_num_contex.bn_ctx = C_NULL
+end
+
+"""
+    Big number, multiprecision integer arithmetics.
+"""
+mutable struct BigNum
+    bn::Ptr{Cvoid}
+
+    function BigNum()
+        big_num = ccall((:BN_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+        if big_num == C_NULL
+            throw(OpenSSLException())
+        end
+
+        big_num = new(big_num)
+
+        finalizer(free, big_num)
+        return big_num
+    end
+
+    function BigNum(value::UInt8)
+        return BigNum(UInt64(value))
+    end
+
+    function BigNum(value::UInt64)
+        big_num = BigNum()
+        if ccall((:BN_set_word, libcrypto),
+                Cint,
+                (BigNum, UInt64,),
+                big_num,
+                value) == 0
+            throw(OpenSSLException())
+        end
+
+        return big_num
+    end
+end
+
+function free(big_num::BigNum)
+    ccall((:BN_free, libcrypto),
+            Ptr{Cvoid},
+            (BigNum,),
+            big_num)
+
+    big_num.bn = C_NULL
+end
+
+function Base.:+(a::BigNum, b::BigNum)::BigNum
+    r = BigNum()
+
+    if ccall((:BN_add, libcrypto),
+            Cint,
+            (BigNum, BigNum, BigNum,),
+            r,
+            a,
+            b) == 0
+        throw(OpenSSLException())
+    end
+
+    return r
+end
+
+function Base.:-(a::BigNum, b::BigNum)::BigNum
+    r = BigNum()
+
+    if ccall((:BN_sub, libcrypto),
+            Cint,
+            (BigNum, BigNum, BigNum,),
+            r,
+            a,
+            b) == 0
+        throw(OpenSSLException())
+    end
+
+    return r
+end
+
+"""
+    EVP_PKEY.
+"""
+mutable struct EvpPKey
+    evp_pkey::Ptr{Cvoid}
+
+    function EvpPKey()::EvpPKey
+        evp_pkey = ccall((:evp_pkey_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+
+        return new(evp_pkey)
+    end
+end
+
+function free(evp_pkey::EvpPKey)
+    ccall((:EVP_PKEY_free, libcrypto),
+            Ptr{Cvoid},
+            (EvpPKey,),
+            evp_pkey)
+
+    evp_pkey.evp_pkey = C_NULL
+end
+
+"""
+    RSA.
+"""
+mutable struct RSA
+    rsa::Ptr{Cvoid}
+
+    function rsa_new()
+        rsa = ccall((:RSA_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+
+        return RSA(rsa)
+    end
+
+end
+
+function rsa_generate_key()
+    rsa = rsa_new()
+
+    # = ccall((:RSA_generate_key, libcrypto),
+    #    Ptr{Cvoid},
+    #    (Cint,  Ptr{Cvoid}, Ptr{Cvoid},),
+    #    num,
+    #    C_NULL,
+    #    C_NULL)
+
+    return RSA(rsa)
+end
+
+"""
     BIO.
 """
 mutable struct BIO
@@ -405,30 +571,30 @@ end
     Creates a file descriptor BIO method.
 """
 function BIOMethod_fd()::BIOMethod
-    bio_meth = ccall((:BIO_s_fd, libcrypto),
+    bio_method = ccall((:BIO_s_fd, libcrypto),
         Ptr{Cvoid},
         ())
 
-    return BIOMethod(bio_meth)
+    return BIOMethod(bio_method)
 end
 
 """
     Creates a memory BIO method.
 """
 function BIOMethod_mem()::BIOMethod
-    bio_meth = ccall((:BIO_s_mem, libcrypto),
+    bio_method = ccall((:BIO_s_mem, libcrypto),
         Ptr{Cvoid},
         ())
 
-    return BIOMethod(bio_meth)
+    return BIOMethod(bio_method)
 end
 
-function free(bioMethod::BIOMethod)
+function free(bio_method::BIOMethod)
     ccall((:BIO_meth_free, libcrypto),
             Ptr{Cvoid},
             (BIOMethod,),
-            bioMethod)
-    bioMethod.bio = C_NULL
+            bio_method)
+    bio_method.bio = C_NULL
 end
 
 """
@@ -576,6 +742,21 @@ end
 
 function ssl_connect(ssl::SSL)::Cint
     result = ccall((:SSL_connect, libssl),
+        Cint,
+        (SSL,),
+        ssl)
+
+    ccall((:SSL_set_read_ahead, libssl),
+        Ptr{Cvoid},
+        (SSL, Cint),
+        ssl,
+        1)
+
+    return result
+end
+
+function ssl_accept(ssl::SSL)::Cint
+    result = ccall((:SSL_accept, libssl),
         Cint,
         (SSL,),
         ssl)
@@ -812,6 +993,22 @@ function Sockets.connect(ssl_stream::SSLStream)
     end
 end
 
+function Sockets.accept(ssl_stream::SSLStream)
+    println("==> accept: $(ssl_stream)")
+
+    write_count::Int = 0
+
+    bio_read_stream = ssl_stream.bio_read_stream
+    bio_write_stream = ssl_stream.bio_write_stream
+
+    GC.@preserve bio_read_stream bio_write_stream begin
+        bio_stream_set_data(bio_read_stream)
+        bio_stream_set_data(bio_write_stream)
+
+        return ssl_accept(ssl_stream.ssl)
+    end
+end
+
 """
     Read from the SSL stream.
 """
@@ -977,6 +1174,30 @@ struct BIOStreamCallbacks
     end
 end
 
+
+function Base.show(io::IO, big_num::BigNum)
+    iob = IOBuffer()
+    bio_stream = BIOStream(iob)
+
+    GC.@preserve bio_stream begin
+        bio_stream_set_data(bio_stream)
+
+        if ccall((:BN_print, libcrypto),
+                Cint,
+                (BIO, BigNum,),
+                bio_stream.bio,
+                big_num) == 0
+            throw(OpenSSLException())
+        end
+    end
+
+    seek(iob, 0)
+
+    write(io, "0x")
+    write(io, String(read(iob)))
+end
+
+
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()
 const BIO_STREAM_CALLBACKS = Ref{BIOStreamCallbacks}()
 const BIO_STREAM_METHOD = Ref{BIOMethod}()
@@ -994,4 +1215,3 @@ function __init__()
 end
 
 end # OpenSSL module
-
