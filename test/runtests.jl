@@ -14,6 +14,23 @@ using MozillaCACerts_jll
     @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_ctrl_ptr != C_NULL
 end
 
+@testset "BigNumbers" begin
+    n1 = BigNum(0x4)
+    n2 = BigNum(0x8)
+    @test String(n1 + n2) == "0xC"
+
+    #n4 = n3 - n1 - n2 - n3
+    #n5 = BigNum(0x2)
+    #@show n1, n2, n3, n4, n1 * n5
+
+    n1 = BigNum(0x10)
+    n2 = BigNum(0x4)
+    @test String(n1 / n2) == "0x4"
+
+    n1 = BigNum(0x11)
+    @test String(n1 % n2) == "0x1"
+end
+
 function test()
     file_handle = open(MozillaCACerts_jll.cacert)
     pem = String(read(file_handle))
@@ -31,8 +48,6 @@ function test()
 end
 
 
-#@show OpenSSL.__init__()
-
 @testset "HttpsConnect" begin
     tcp_stream = connect("www.nghttp2.org", 443)
 
@@ -48,8 +63,9 @@ end
     # TODO expose connect
     @show result = OpenSSL.connect(ssl_stream)
 
+    close(ssl_stream)
+
     x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
-    @show x509_server_cert
 
     @test x509_server_cert.issuer_name == "/C=US/O=Let's Encrypt/CN=R3"
     @test x509_server_cert.subject_name == "/CN=nghttp2.org"
@@ -69,10 +85,9 @@ end
     # Htt
 end
 
-@testset "BigNumbers" begin
-    n1 = BigNum(0x4)
-    n2 = BigNum(0x8)
-    n3 = n1 + n2
-    n4 = n3 - n1
-    @show n1, n2, n3, n4
-end
+evp_pkey = EvpPKey(rsa_generate_key())
+x509_certificate = X509Certificate()
+X509_name = get_subject_name(x509_certificate)
+
+
+

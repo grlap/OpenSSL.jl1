@@ -7,12 +7,17 @@ using BitFlags
 """
     [ ] Free BIO
     [ ] Free BIOMethod
-    [ ] BIO_IO or BIO_JuliaIO, BIOStream method (callbacks)
-    [x] Store the SSLContext
-        part of SSLStream
+    [ ] Free on BIOStream
+    [ ] Close SSLContext
+    [x] BIOStream method (callbacks)
+    [x] Store the SSLContext (part of SSLStream)
 """
 
-export TLSv12ClientMethod, SSLStream, BigNum,
+export TLSv12ClientMethod, SSLStream, 
+    BigNum, EvpPKey, RSA,
+    rsa_generate_key,
+    X509Certificate,
+    get_subject_name,
     eof, bytesavailable, read, unsafe_write, connect,
     get_peer_certificate,
     HTTP2_ALPN, UPDATE_HTTP2_ALPN
@@ -231,6 +236,9 @@ end
 
 const OPENSSL_INIT_SSL_DEFAULT = (OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS)
 
+# define RSA_3   0x3L
+# define RSA_F4  0x10001L
+
 """
     OpenSSL exception.
 """
@@ -239,6 +247,7 @@ mutable struct OpenSSLException <: Exception
 end
 
 """
+    Big number context.
 """
 mutable struct BigNumContext
     bn_ctx::Ptr{Cvoid}
@@ -291,6 +300,10 @@ mutable struct BigNum
         return BigNum(UInt64(value))
     end
 
+    function BigNum(value::UInt32)
+        return BigNum(UInt64(value))
+    end
+
     function BigNum(value::UInt64)
         big_num = BigNum()
         if ccall((:BN_set_word, libcrypto),
@@ -306,6 +319,7 @@ mutable struct BigNum
 end
 
 function free(big_num::BigNum)
+    println("free big_num")
     ccall((:BN_free, libcrypto),
             Ptr{Cvoid},
             (BigNum,),
@@ -344,6 +358,126 @@ function Base.:-(a::BigNum, b::BigNum)::BigNum
     return r
 end
 
+function Base.:*(a::BigNum, b::BigNum)::BigNum
+    r = BigNum()
+
+    c = BigNumContext()
+
+    if ccall((:BN_mul, libcrypto),
+            Cint,
+            (BigNum, BigNum, BigNum, BigNumContext),
+            r,
+            a,
+            b,
+            c) == 0
+        throw(OpenSSLException())
+    end
+
+    finalize(c)
+
+    return r
+end
+
+function Base.:/(a::BigNum, b::BigNum)::BigNum
+    dv = BigNum()
+    rm = BigNum()
+
+    c = BigNumContext()
+
+    if ccall((:BN_div, libcrypto),
+            Cint,
+            (BigNum, BigNum, BigNum, BigNum, BigNumContext),
+            dv,
+            rm,
+            a,
+            b,
+            c) == 0
+        throw(OpenSSLException())
+    end
+
+    finalize(rm)
+    finalize(c)
+
+    return dv
+end
+
+function Base.:%(a::BigNum, b::BigNum)::BigNum
+    dv = BigNum()
+    rm = BigNum()
+
+    c = BigNumContext()
+
+    if ccall((:BN_div, libcrypto),
+            Cint,
+            (BigNum, BigNum, BigNum, BigNum, BigNumContext),
+            dv,
+            rm,
+            a,
+            b,
+            c) == 0
+        throw(OpenSSLException())
+    end
+
+    finalize(dv)
+    finalize(c)
+
+    return rm
+end
+
+"""
+    RSA structure.
+    The RSA structure consists of several BIGNUM components.
+    It can contain public as well as private RSA keys:
+"""
+mutable struct RSA
+    rsa::Ptr{Cvoid}
+
+    function RSA()
+        rsa = ccall((:RSA_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+
+        rsa = new(rsa)
+        finalizer(free, rsa)
+
+        return rsa
+    end
+end
+
+function free(rsa::RSA)
+    println("free rsa $(rsa)")
+
+    ccall((:RSA_free, libcrypto),
+        Ptr{Cvoid},
+        (RSA,),
+        rsa)
+
+    rsa.rsa = C_NULL
+end
+
+const EVP_PKEY_RSA = 6 #NID_rsaEncryption
+#const EVP_PKEY_DSA = 6
+const RSA_F4 = 0x10001
+
+"""
+    Generate RSA key pair.
+"""
+function rsa_generate_key(bits::Int32 = Int32(2048))::RSA
+    rsa = RSA()
+    big_num = BigNum(UInt64(RSA_F4))
+
+    result = ccall((:RSA_generate_key_ex, libcrypto),
+        Cint,
+        (RSA, Cint, BigNum, Ptr{Cvoid},),
+        rsa,
+        bits,
+        big_num,
+        C_NULL)
+    @show result
+
+    return rsa
+end
+
 """
     EVP_PKEY.
 """
@@ -351,50 +485,40 @@ mutable struct EvpPKey
     evp_pkey::Ptr{Cvoid}
 
     function EvpPKey()::EvpPKey
-        evp_pkey = ccall((:evp_pkey_new, libcrypto),
+        evp_pkey = ccall((:EVP_PKEY_new, libcrypto),
             Ptr{Cvoid},
             ())
 
-        return new(evp_pkey)
+        evp_pkey = new(evp_pkey)
+        finalizer(free, evp_pkey)
+
+        return evp_pkey
+    end
+
+    function EvpPKey(rsa::RSA)::EvpPKey
+        evp_pkey = EvpPKey()
+
+        result = ccall((:EVP_PKEY_assign, libcrypto),
+            Cint,
+            (EvpPKey, Cint, RSA,),
+            evp_pkey,
+            EVP_PKEY_RSA,
+            rsa)
+
+        rsa.rsa = C_NULL
+
+        return evp_pkey
     end
 end
 
 function free(evp_pkey::EvpPKey)
+    println("free evp_pkey")
     ccall((:EVP_PKEY_free, libcrypto),
-            Ptr{Cvoid},
-            (EvpPKey,),
-            evp_pkey)
+        Ptr{Cvoid},
+        (EvpPKey,),
+        evp_pkey)
 
     evp_pkey.evp_pkey = C_NULL
-end
-
-"""
-    RSA.
-"""
-mutable struct RSA
-    rsa::Ptr{Cvoid}
-
-    function rsa_new()
-        rsa = ccall((:RSA_new, libcrypto),
-            Ptr{Cvoid},
-            ())
-
-        return RSA(rsa)
-    end
-
-end
-
-function rsa_generate_key()
-    rsa = rsa_new()
-
-    # = ccall((:RSA_generate_key, libcrypto),
-    #    Ptr{Cvoid},
-    #    (Cint,  Ptr{Cvoid}, Ptr{Cvoid},),
-    #    num,
-    #    C_NULL,
-    #    C_NULL)
-
-    return RSA(rsa)
 end
 
 """
@@ -433,6 +557,10 @@ function bio_stream_from_data(bio::BIO)::BIOStream
     bio_stream::BIOStream = unsafe_pointer_to_objref(user_data)
 
     return bio_stream
+end
+
+function close(bio_stream::BIOStream)
+    println("Close bio_stream")
 end
 
 """
@@ -878,7 +1006,7 @@ function free(x509_cert::X509Certificate)
     x509_cert.x509 = C_NULL
 end
 
-function get_subject_name(x509_cert::X509Certificate)
+function get_subject_name(x509_cert::X509Certificate)::X509Name
     x509_name = ccall((:X509_get_subject_name, libcrypto),
         Ptr{Cvoid},
         (X509Certificate,),
@@ -1116,6 +1244,11 @@ function get_peer_certificate(ssl_stream::SSLStream)::Option{X509Certificate}
     end
 end
 
+function Base.close(ssl_stream::SSLStream)
+    println("Close ssl_stream")
+
+    close(ssl_stream.bio_read_stream)
+end
 
 """
     Crypto Init.
@@ -1174,10 +1307,11 @@ struct BIOStreamCallbacks
     end
 end
 
-
-function Base.show(io::IO, big_num::BigNum)
+function String(big_num::BigNum)
     iob = IOBuffer()
     bio_stream = BIOStream(iob)
+
+    write(iob, "0x")
 
     GC.@preserve bio_stream begin
         bio_stream_set_data(bio_stream)
@@ -1193,10 +1327,12 @@ function Base.show(io::IO, big_num::BigNum)
 
     seek(iob, 0)
 
-    write(io, "0x")
-    write(io, String(read(iob)))
+    return String(read(iob))
 end
 
+function Base.show(io::IO, big_num::BigNum)
+    write(io, String(big_num))
+end
 
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()
 const BIO_STREAM_CALLBACKS = Ref{BIOStreamCallbacks}()
