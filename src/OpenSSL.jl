@@ -915,19 +915,23 @@ function get_error()::Int64
 end
 
 """
-    ASN1_TIME
+    ASN1_TIME.
 """
 mutable struct Asn1Time
     asn1_time::Ptr{Cvoid}
 
     Asn1Time(asn1_time::Ptr{Cvoid}) = new(asn1_time)
 
-    function Asn1Time()
+    Asn1Time() = Asn1Time(0)
+
+    Asn1Time(date_time::DateTime) = Asn1Time(Int64(floor(datetime2unix(date_time))))
+
+    function Asn1Time(unix_time::Int64)
         asn1_time = ccall((:ASN1_TIME_set, libcrypto),
             Ptr{Cvoid},
             (Ptr{Cvoid}, Int64),
             C_NULL,
-            Dates.second(Dates.now()))
+            unix_time)
         if asn1_time == C_NULL
             throw(OpenSSLException())
         end

@@ -1,6 +1,8 @@
-using Test
+using Dates
 using OpenSSL
 using Sockets
+using Test
+
 using MozillaCACerts_jll
 
 # Verifies calling into OpenSSL library.
@@ -29,6 +31,12 @@ end
 
     n1 = BigNum(0x11)
     @test String(n1 % n2) == "0x1"
+end
+
+@testset "Asn1Time" begin
+    @test String(Asn1Time()) == "Jan  1 00:00:00 1970 GMT"
+    @test String(Asn1Time(2)) == "Jan  1 00:00:02 1970 GMT"
+    @show Asn1Time(Dates.now())
 end
 
 function test()
@@ -105,7 +113,4 @@ seek(iob, 0)
 
 @show x509_name, String(x509_name)
 @show x509_certificate
-
-a = Asn1Time()
-@show a
 
