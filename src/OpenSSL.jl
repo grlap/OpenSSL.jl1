@@ -1,8 +1,9 @@
 module OpenSSL
 
+using BitFlags
+using Dates
 using OpenSSL_jll
 using Sockets
-using BitFlags
 
 """
     [ ] Free BIO
@@ -924,9 +925,9 @@ mutable struct Asn1Time
     function Asn1Time()
         asn1_time = ccall((:ASN1_TIME_set, libcrypto),
             Ptr{Cvoid},
-            (Ptr{Cvoid}, Cint),
+            (Ptr{Cvoid}, Int64),
             C_NULL,
-            0)
+            Dates.second(Dates.now()))
         if asn1_time == C_NULL
             throw(OpenSSLException())
         end
