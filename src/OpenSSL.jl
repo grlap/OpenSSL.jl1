@@ -15,9 +15,10 @@ using BitFlags
 
 export TLSv12ClientMethod, SSLStream, 
     BigNum, EvpPKey, RSA,
+    Asn1Time, X509Name, X509Certificate,
     rsa_generate_key,
-    X509Certificate,
     get_subject_name,
+    add_entry, sign_certificate,
     eof, bytesavailable, read, unsafe_write, connect,
     get_peer_certificate,
     HTTP2_ALPN, UPDATE_HTTP2_ALPN
@@ -296,13 +297,9 @@ mutable struct BigNum
         return big_num
     end
 
-    function BigNum(value::UInt8)
-        return BigNum(UInt64(value))
-    end
+    BigNum(value::UInt8) = BigNum(UInt64(value))
 
-    function BigNum(value::UInt32)
-        return BigNum(UInt64(value))
-    end
+    BigNum(value::UInt32) = BigNum(UInt64(value))
 
     function BigNum(value::UInt64)
         big_num = BigNum()
@@ -319,7 +316,6 @@ mutable struct BigNum
 end
 
 function free(big_num::BigNum)
-    println("free big_num")
     ccall((:BN_free, libcrypto),
             Ptr{Cvoid},
             (BigNum,),
@@ -479,7 +475,7 @@ function rsa_generate_key(bits::Int32 = Int32(2048))::RSA
 end
 
 """
-    EVP_PKEY.
+    EVP_PKEY, EVP Public Key interface.
 """
 mutable struct EvpPKey
     evp_pkey::Ptr{Cvoid}
@@ -918,10 +914,60 @@ function get_error()::Int64
 end
 
 """
+    ASN1_TIME
+"""
+mutable struct Asn1Time
+    asn1_time::Ptr{Cvoid}
+
+    Asn1Time(asn1_time::Ptr{Cvoid}) = new(asn1_time)
+
+    function Asn1Time()
+        asn1_time = ccall((:ASN1_TIME_set, libcrypto),
+            Ptr{Cvoid},
+            (Ptr{Cvoid}, Cint),
+            C_NULL,
+            0)
+        if asn1_time == C_NULL
+            throw(OpenSSLException())
+        end
+
+        asn1_time = new(asn1_time)
+
+        finalizer(free, asn1_time)
+        return asn1_time
+    end
+end
+
+function free(asn1_time::Asn1Time)
+    ccall((:ASN1_STRING_free, libcrypto),
+        Cvoid,
+        (Asn1Time,),
+        asn1_time)
+
+    asn1_time.asn1_time = C_NULL
+end
+
+"""
     X509 Name.
 """
 mutable struct X509Name
     x509_name::Ptr{Cvoid}
+
+    X509Name(x509_name::Ptr{Cvoid}) = new(x509_name)
+
+    function X509Name()
+        x509_name = ccall((:X509_NAME_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+        if x509_name == C_NULL
+            throw(OpenSSLException())
+        end
+
+        x509_name = new(x509_name)
+
+        finalizer(free, x509_name)
+        return x509_name
+    end
 end
 
 function free(x509_name::X509Name)
@@ -936,7 +982,7 @@ end
 """
     X509Name to string.
 """
-function string(x509_name::X509Name)::String
+function Base.String(x509_name::X509Name)::String
     name_ptr = ccall((:X509_NAME_oneline, libcrypto),
         Cstring,
         (X509Name, Ptr{UInt8}, Cint,),
@@ -946,12 +992,36 @@ function string(x509_name::X509Name)::String
 
     str = unsafe_string(name_ptr)
 
-    name_ptr = ccall((:CRYPTO_free, libcrypto),
+    ccall((:CRYPTO_free, libcrypto),
         Cvoid,
         (Cstring,),
         name_ptr)
 
     return str
+end
+
+const MBSTRING_FLAG = 0x1000
+const MBSTRING_UTF8 = (MBSTRING_FLAG)
+const MBSTRING_ASC = (MBSTRING_FLAG | 1)
+const MBSTRING_BMP = (MBSTRING_FLAG | 2)
+const MBSTRING_UNIV = (MBSTRING_FLAG | 4)
+
+function add_entry(x509_name::X509Name, field::String, value::String)
+    result = ccall((:X509_NAME_add_entry_by_txt, libcrypto),
+        Cint,
+        (X509Name, Cstring, Cint, Cstring, Cint, Cint, Cint),
+        x509_name,
+        field,
+        MBSTRING_ASC,
+        value,
+        -1,
+        -1,
+        0)
+    if result == 0
+        throw(OpenSSLException())
+    end
+
+    nothing
 end
 
 """
@@ -961,12 +1031,42 @@ mutable struct X509Certificate
     x509::Ptr{Cvoid}
 
     function X509Certificate()
-        x509 = ccall((:X509_new, libssl), Ptr{Cvoid}, ())
+        x509 = ccall((:X509_new, libcrypto), Ptr{Cvoid}, ())
+        if x509 == C_NULL
+            throw(OpenSSLException())
+        end
+
         return X509Certificate(x509)
     end
 
     function X509Certificate(x509::Ptr{Cvoid})
         x509_cert = new(x509)
+
+        am = ccall((:X509_getm_notBefore, libssl),
+            Ptr{Cvoid},
+            (X509Certificate,),
+            x509_cert)
+
+        am = ccall((:X509_gmtime_adj, libssl),
+            Ptr{Cvoid},
+            (Ptr{Cvoid}, Int64,),
+            am,
+            0)
+
+        @show Asn1Time(am)
+
+        af = ccall((:X509_getm_notAfter, libssl),
+            Ptr{Cvoid},
+            (X509Certificate,),
+            x509_cert)
+
+        af = ccall((:X509_gmtime_adj, libssl),
+            Ptr{Cvoid},
+            (Ptr{Cvoid}, Int64,),
+            af,
+            31536000)
+
+        @show af
 
         finalizer(free, x509_cert)
         return x509_cert
@@ -1006,6 +1106,51 @@ function free(x509_cert::X509Certificate)
     x509_cert.x509 = C_NULL
 end
 
+function Base.write(io::IO, x509_cert::X509Certificate)
+    bio_stream = OpenSSL.BIOStream(io)
+
+    GC.@preserve bio_stream begin
+        bio_stream_set_data(bio_stream)
+
+        result = ccall((:PEM_write_bio_X509, libcrypto),
+            Cint,
+            (BIO, X509Certificate,),
+            bio_stream.bio,
+            x509_cert)
+
+        @show result
+    end
+end
+
+function sign_certificate(x509_cert::X509Certificate, evp_pkey::EvpPKey)
+    evp_md = ccall((:EVP_sha256, libcrypto),
+        Ptr{Cvoid},
+        ())
+    @show "Evp: $(evp_md)"
+
+    result = ccall((:X509_set_pubkey, libcrypto),
+        Cint,
+        (X509Certificate, EvpPKey,),
+        x509_cert,
+        evp_pkey)
+    @show "509 set pub key: $(result)"
+
+    result = ccall((:X509_sign, libcrypto),
+        Cint,
+        (X509Certificate, EvpPKey, Ptr{Cvoid},),
+        x509_cert,
+        evp_pkey,
+        evp_md)
+    @show "x509_sign $(result)"
+
+    result = ccall((:X509_verify, libcrypto),
+        Cint,
+        (X509Certificate, EvpPKey,),
+        x509_cert,
+        evp_pkey)
+    @show "verify $(result)"
+end
+
 function get_subject_name(x509_cert::X509Certificate)::X509Name
     x509_name = ccall((:X509_get_subject_name, libcrypto),
         Ptr{Cvoid},
@@ -1016,6 +1161,16 @@ function get_subject_name(x509_cert::X509Certificate)::X509Name
     x509_name = X509Name(x509_name)
 
     return x509_name
+end
+
+function set_subject_name(x509_cert::X509Certificate, x509_name::X509Name)
+    if ccall((:X509_set_subject_name, libcrypto),
+            Cint,
+            (X509Certificate,X509Name),
+            x509_cert,
+            x509_name) == 0
+        throw(OpenSSLException())
+    end
 end
 
 function get_issuer_name(x509_cert::X509Certificate)
@@ -1030,14 +1185,44 @@ function get_issuer_name(x509_cert::X509Certificate)
     return x509_name
 end
 
+function set_subject_name(x509_cert::X509Certificate, x509_name::X509Name)
+    if ccall((:X509_set_subject_name, libcrypto),
+            Cint,
+            (X509Certificate,X509Name),
+            x509_cert,
+            x509_name) == 0
+        throw(OpenSSLException())
+    end
+end
+
+function set_issuer_name(x509_cert::X509Certificate, x509_name::X509Name)
+    if ccall((:X509_set_issuer_name, libcrypto),
+            Cint,
+            (X509Certificate,X509Name),
+            x509_cert,
+            x509_name) == 0
+        throw(OpenSSLException())
+    end
+end
+
 function Base.getproperty(x509_certificate::X509Certificate, name::Symbol)
-   if name === :subject_name
-       return string(get_subject_name(x509_certificate))
-   elseif name === :issuer_name
-       return string(get_issuer_name(x509_certificate))
-   else # fallback to getfield
-       return getfield(obj, sym)
-   end
+    if name === :subject_name
+        return String(get_subject_name(x509_certificate))
+    elseif name === :issuer_name
+        return String(get_issuer_name(x509_certificate))
+    else # fallback to getfield
+        return getfield(x509_certificate, name)
+    end
+end
+
+function Base.setproperty!(x509_certificate::X509Certificate, name::Symbol, value)
+    if name === :subject_name
+        set_subject_name(x509_certificate, value)
+    elseif name === :issuer_name
+        set_issuer_name(x509_certificate, value)
+    else # fallback to setfield
+        setfield!(x509_certificate, name, value)
+    end
 end
 
 """
@@ -1307,7 +1492,7 @@ struct BIOStreamCallbacks
     end
 end
 
-function String(big_num::BigNum)
+function Base.String(big_num::BigNum)
     iob = IOBuffer()
     bio_stream = BIOStream(iob)
 
@@ -1330,8 +1515,45 @@ function String(big_num::BigNum)
     return String(read(iob))
 end
 
+function Base.String(asn1_time::Asn1Time)
+    iob = IOBuffer()
+    bio_stream = BIOStream(iob)
+
+    GC.@preserve bio_stream begin
+        bio_stream_set_data(bio_stream)
+
+        if ccall((:ASN1_TIME_print, libcrypto),
+                Cint,
+                (BIO, Asn1Time,),
+                bio_stream.bio,
+                asn1_time) == 0
+            throw(OpenSSLException())
+        end
+    end
+
+    seek(iob, 0)
+
+    return String(read(iob))
+end
+
 function Base.show(io::IO, big_num::BigNum)
     write(io, String(big_num))
+end
+
+function Base.show(io::IO, asn1_time::Asn1Time)
+    write(io, String(asn1_time))
+end
+
+function Base.show(io::IO, x509_name::X509Name)
+    write(io, String(x509_name))
+end
+
+function Base.show(io::IO, x509_cert::X509Certificate)
+    println(
+        io,
+        """X509Certificate:
+        subject_name: $(x509_cert.subject_name)
+        issuer_name: $(x509_cert.issuer_name)""")
 end
 
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()
@@ -1351,3 +1573,4 @@ function __init__()
 end
 
 end # OpenSSL module
+    

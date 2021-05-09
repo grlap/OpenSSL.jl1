@@ -39,14 +39,13 @@ function test()
     start_line = "==========\n"
 
     cert = "-----BEGIN CERTIFICATE-----\nMIIDdTCCAl2gAwIBAgILBAAAAAABFUtaw5QwDQYJKoZIhvcNAQEFBQAwVzELMAkGA1UEBhMCQkUx\nGTAXBgNVBAoTEEdsb2JhbFNpZ24gbnYtc2ExEDAOBgNVBAsTB1Jvb3QgQ0ExGzAZBgNVBAMTEkds\nb2JhbFNpZ24gUm9vdCBDQTAeFw05ODA5MDExMjAwMDBaFw0yODAxMjgxMjAwMDBaMFcxCzAJBgNV\nBAYTAkJFMRkwFwYDVQQKExBHbG9iYWxTaWduIG52LXNhMRAwDgYDVQQLEwdSb290IENBMRswGQYD\nVQQDExJHbG9iYWxTaWduIFJvb3QgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDa\nDuaZjc6j40+Kfvvxi4Mla+pIH/EqsLmVEQS98GPR4mdmzxzdzxtIK+6NiY6arymAZavpxy0Sy6sc\nTHAHoT0KMM0VjU/43dSMUBUc71DuxC73/OlS8pF94G3VNTCOXkNz8kHp1Wrjsok6Vjk4bwY8iGlb\nKk3Fp1S4bInMm/k8yuX9ifUSPJJ4ltbcdG6TRGHRjcdGsnUOhugZitVtbNV4FpWi6cgKOOvyJBNP\nc1STE4U6G7weNLWLBYy5d4ux2x8gkasJU26Qzns3dLlwR5EiUWMWea6xrkEmCMgZK9FGqkjWZCrX\ngzT/LCrBbBlDSgeF59N89iFo7+ryUp9/k5DPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNV\nHRMBAf8EBTADAQH/MB0GA1UdDgQWBBRge2YaRQ2XyolQL30EzTSo//z9SzANBgkqhkiG9w0BAQUF\nAAOCAQEA1nPnfE920I2/7LqivjTFKDK1fPxsnCwrvQmeU79rXqoRSLblCKOzyj1hTdNGCbM+w6Dj\nY1Ub8rrvrTnhQ7k4o+YviiY776BQVvnGCv04zcQLcFGUl5gE38NflNUVyRRBnMRddWQVDf9VMOyG\nj/8N7yy5Y0b2qvzfvGn9LhJIZJrglfCm7ymPAbEVtQwdpf5pLGkkeB6zpxxxYu7KyJesF12KwvhH\nhm4qxFYxldBniYUr+WymXUadDKqC5JlR3XC321Y9YeRq4VzW9v493kHMB65jUr9TU/Qr6cf9tveC\nX4XSQRjbgbMEHMUfpIBvFSDJ3gyICh3WZlXi/EjJKSZp4A==\n-----END CERTIFICATE-----"
-    certs_pem = split(pem, start_line; keepempty = false)
+    #certs_pem = split(pem, start_line; keepempty = false)
     x509_cert = OpenSSL.X509Certificate(cert)
     @show x509_cert
     x509_name = OpenSSL.get_subject_name(x509_cert)
     @show x509_name
     @show OpenSSL.string(x509_name)
 end
-
 
 @testset "HttpsConnect" begin
     tcp_stream = connect("www.nghttp2.org", 443)
@@ -87,7 +86,26 @@ end
 
 evp_pkey = EvpPKey(rsa_generate_key())
 x509_certificate = X509Certificate()
-X509_name = get_subject_name(x509_certificate)
+x509_name = X509Name() # get_subject_name(x509_certificate)
+add_entry(x509_name, "C", "US")
+add_entry(x509_name, "ST", "Isles of Redmond")
+add_entry(x509_name, "CN", "www.redmond.com")
 
+x509_certificate.subject_name = x509_name
+x509_certificate.issuer_name = x509_name
 
+sign_certificate(x509_certificate, evp_pkey)
+
+iob = IOBuffer()
+
+write(iob, x509_certificate)
+
+seek(iob, 0)
+@show String(read(iob))
+
+@show x509_name, String(x509_name)
+@show x509_certificate
+
+a = Asn1Time()
+@show a
 
