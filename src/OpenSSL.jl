@@ -971,7 +971,7 @@ mutable struct X509Name
 end
 
 function free(x509_name::X509Name)
-    ccall((:X509_NAME_free, libssl),
+    ccall((:X509_NAME_free, libcrypto),
         Cvoid,
         (X509Name,),
         x509_name)
