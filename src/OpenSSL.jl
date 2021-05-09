@@ -1042,12 +1042,12 @@ mutable struct X509Certificate
     function X509Certificate(x509::Ptr{Cvoid})
         x509_cert = new(x509)
 
-        am = ccall((:X509_getm_notBefore, libssl),
+        am = ccall((:X509_getm_notBefore, libcrypto),
             Ptr{Cvoid},
             (X509Certificate,),
             x509_cert)
 
-        am = ccall((:X509_gmtime_adj, libssl),
+        am = ccall((:X509_gmtime_adj, libcrypto),
             Ptr{Cvoid},
             (Ptr{Cvoid}, Int64,),
             am,
@@ -1055,12 +1055,12 @@ mutable struct X509Certificate
 
         @show Asn1Time(am)
 
-        af = ccall((:X509_getm_notAfter, libssl),
+        af = ccall((:X509_getm_notAfter, libcrypto),
             Ptr{Cvoid},
             (X509Certificate,),
             x509_cert)
 
-        af = ccall((:X509_gmtime_adj, libssl),
+        af = ccall((:X509_gmtime_adj, libcrypto),
             Ptr{Cvoid},
             (Ptr{Cvoid}, Int64,),
             af,
