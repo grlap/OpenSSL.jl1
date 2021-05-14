@@ -1070,8 +1070,7 @@ mutable struct X509Certificate
             (Ptr{Cvoid}, Int64,),
             af,
             31536000)
-
-        @show af
+        @show Asn1Time(af)
 
         finalizer(free, x509_cert)
         return x509_cert
@@ -1178,7 +1177,7 @@ function set_subject_name(x509_cert::X509Certificate, x509_name::X509Name)
     end
 end
 
-function get_issuer_name(x509_cert::X509Certificate)
+function get_issuer_name(x509_cert::X509Certificate)::X509Name
     x509_name = ccall((:X509_get_issuer_name, libcrypto),
         Ptr{Cvoid},
         (X509Certificate,),
@@ -1190,31 +1189,71 @@ function get_issuer_name(x509_cert::X509Certificate)
     return x509_name
 end
 
-function set_subject_name(x509_cert::X509Certificate, x509_name::X509Name)
-    if ccall((:X509_set_subject_name, libcrypto),
+function set_issuer_name(x509_cert::X509Certificate, x509_name::X509Name)
+    if ccall((:X509_set_issuer_name, libcrypto),
             Cint,
-            (X509Certificate,X509Name),
+            (X509Certificate, X509Name),
             x509_cert,
             x509_name) == 0
         throw(OpenSSLException())
     end
 end
 
-function set_issuer_name(x509_cert::X509Certificate, x509_name::X509Name)
-    if ccall((:X509_set_issuer_name, libcrypto),
+function get_time_not_before(x509_cert::X509Certificate)::Asn1Time
+    asn1_time = ccall((:X509_getm_notBefore, libcrypto),
+            Ptr{Cvoid},
+            (X509Certificate,),
+            x509_cert)
+    if asn1_time == C_NULL
+        throw(OpenSSLException())
+    end
+
+    asn1_time = Asn1Time(asn1_time)
+    return asn1_time
+end
+
+function set_time_not_before(x509_cert::X509Certificate, asn1_time::Asn1Time)
+    if ccall((:X509_set1_notBefore, libcrypto),
             Cint,
-            (X509Certificate,X509Name),
+            (X509Certificate, Asn1Time),
             x509_cert,
-            x509_name) == 0
+            asn1_time) == 0
+        throw(OpenSSLException())
+    end
+end
+
+function get_time_not_after(x509_cert::X509Certificate)::Asn1Time
+    asn1_time = ccall((:X509_getm_notAfter, libcrypto),
+            Ptr{Cvoid},
+            (X509Certificate,),
+            x509_cert)
+    if asn1_time == C_NULL
+        throw(OpenSSLException())
+    end
+
+    asn1_time = Asn1Time(asn1_time)
+    return asn1_time
+end
+
+function set_time_not_after(x509_cert::X509Certificate, asn1_time::Asn1Time)
+    if ccall((:X509_set1_notAfter, libcrypto),
+            Cint,
+            (X509Certificate, Asn1Time),
+            x509_cert,
+            asn1_time) == 0
         throw(OpenSSLException())
     end
 end
 
 function Base.getproperty(x509_certificate::X509Certificate, name::Symbol)
     if name === :subject_name
-        return String(get_subject_name(x509_certificate))
+        return get_subject_name(x509_certificate)
     elseif name === :issuer_name
-        return String(get_issuer_name(x509_certificate))
+        return get_issuer_name(x509_certificate)
+    elseif name === :time_not_before
+        return get_time_not_before(x509_certificate)
+    elseif name === :time_not_after
+        return get_time_not_after(x509_certificate)
     else # fallback to getfield
         return getfield(x509_certificate, name)
     end
@@ -1225,6 +1264,10 @@ function Base.setproperty!(x509_certificate::X509Certificate, name::Symbol, valu
         set_subject_name(x509_certificate, value)
     elseif name === :issuer_name
         set_issuer_name(x509_certificate, value)
+    elseif name === :time_not_before
+        set_time_not_before(x509_certificate, value)
+    elseif name === :time_not_after
+        set_time_not_after(x509_certificate, value)
     else # fallback to setfield
         setfield!(x509_certificate, name, value)
     end
@@ -1578,4 +1621,3 @@ function __init__()
 end
 
 end # OpenSSL module
-    

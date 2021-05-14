@@ -74,8 +74,8 @@ end
 
     x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
 
-    @test x509_server_cert.issuer_name == "/C=US/O=Let's Encrypt/CN=R3"
-    @test x509_server_cert.subject_name == "/CN=nghttp2.org"
+    @test String(x509_server_cert.issuer_name) == "/C=US/O=Let's Encrypt/CN=R3"
+    @test String(x509_server_cert.subject_name) == "/CN=nghttp2.org"
 
     r = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
 
@@ -103,6 +103,9 @@ x509_certificate.subject_name = x509_name
 x509_certificate.issuer_name = x509_name
 
 sign_certificate(x509_certificate, evp_pkey)
+
+@show OpenSSL.get_time_not_before(x509_certificate)
+@show OpenSSL.get_time_not_after(x509_certificate)
 
 iob = IOBuffer()
 
