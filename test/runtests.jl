@@ -37,6 +37,23 @@ end
     @test String(Asn1Time()) == "Jan  1 00:00:00 1970 GMT"
     @test String(Asn1Time(2)) == "Jan  1 00:00:02 1970 GMT"
     @show Asn1Time(Dates.now())
+
+    asn1_time = Asn1Time()
+    OpenSSL.adjust(asn1_time, Dates.Second(4))
+
+    OpenSSL.free(asn1_time)
+    @test String(asn1_time) == "C_NULL"
+
+    # double free
+    OpenSSL.free(asn1_time)
+    @test String(asn1_time) == "C_NULL"
+
+    OpenSSL.adjust(asn1_time, Dates.Second(4))
+    OpenSSL.adjust(asn1_time, Dates.Second(4))
+    OpenSSL.adjust(asn1_time, Dates.Day(4))
+    OpenSSL.adjust(asn1_time, Dates.Year(2))
+
+    @show asn1_time
 end
 
 function test()
@@ -99,6 +116,9 @@ add_entry(x509_name, "C", "US")
 add_entry(x509_name, "ST", "Isles of Redmond")
 add_entry(x509_name, "CN", "www.redmond.com")
 
+adjust(x509_certificate.time_not_before, Second(0))
+adjust(x509_certificate.time_not_after, Year(1))
+
 x509_certificate.subject_name = x509_name
 x509_certificate.issuer_name = x509_name
 
@@ -116,4 +136,3 @@ seek(iob, 0)
 
 @show x509_name, String(x509_name)
 @show x509_certificate
-

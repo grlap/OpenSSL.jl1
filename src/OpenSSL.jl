@@ -19,7 +19,7 @@ export TLSv12ClientMethod, SSLStream,
     Asn1Time, X509Name, X509Certificate,
     rsa_generate_key,
     get_subject_name,
-    add_entry, sign_certificate,
+    add_entry, sign_certificate, adjust,
     eof, bytesavailable, read, unsafe_write, connect,
     get_peer_certificate,
     HTTP2_ALPN, UPDATE_HTTP2_ALPN
@@ -237,6 +237,14 @@ const SSL_OP_ALL = (SSL_OP_CRYPTOPRO_TLSEXT_BUG|
 end
 
 const OPENSSL_INIT_SSL_DEFAULT = (OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS)
+
+const MBSTRING_FLAG = 0x1000
+
+@enum(MBStringFlags::Int32,
+    MBSTRING_UTF8 = MBSTRING_FLAG,
+    MBSTRING_ASC = (MBSTRING_FLAG | 1),
+    MBSTRING_BMP = (MBSTRING_FLAG | 2),
+    MBSTRING_UNIV = (MBSTRING_FLAG | 4))
 
 # define RSA_3   0x3L
 # define RSA_F4  0x10001L
@@ -523,6 +531,17 @@ end
 """
 mutable struct BIO
     bio::Ptr{Cvoid}
+end
+
+"""
+    EVP_CIPHER.
+"""
+mutable struct EVPCipher
+
+end
+
+mutable struct EVPCipherContext
+    evp_cipher_ctx::Ptr{Cvoid}
 end
 
 """
@@ -952,6 +971,26 @@ function free(asn1_time::Asn1Time)
     asn1_time.asn1_time = C_NULL
 end
 
+function Dates.adjust(asn1_time::Asn1Time, seconds::Second)
+    adj_asn1_time = ccall((:X509_gmtime_adj, libcrypto),
+            Ptr{Cvoid},
+            (Asn1Time, Int64,),
+            asn1_time,
+            seconds.value)
+    if adj_asn1_time == C_NULL
+        throw(OpenSSLException())
+    end
+
+    if (adj_asn1_time != asn1_time.asn1_time)
+        free(asn1_time)
+        asn1_time.asn1_time = adj_asn1_time
+    end
+end
+
+Dates.adjust(asn1_time::Asn1Time, days::Day) = adjust(asn1_time, Second(days))
+
+Dates.adjust(asn1_time::Asn1Time, years::Year) = adjust(asn1_time, Day(365 * years.value))
+
 """
     X509 Name.
 """
@@ -1005,12 +1044,6 @@ function Base.String(x509_name::X509Name)::String
     return str
 end
 
-const MBSTRING_FLAG = 0x1000
-const MBSTRING_UTF8 = (MBSTRING_FLAG)
-const MBSTRING_ASC = (MBSTRING_FLAG | 1)
-const MBSTRING_BMP = (MBSTRING_FLAG | 2)
-const MBSTRING_UNIV = (MBSTRING_FLAG | 4)
-
 function add_entry(x509_name::X509Name, field::String, value::String)
     result = ccall((:X509_NAME_add_entry_by_txt, libcrypto),
         Cint,
@@ -1047,30 +1080,30 @@ mutable struct X509Certificate
     function X509Certificate(x509::Ptr{Cvoid})
         x509_cert = new(x509)
 
-        am = ccall((:X509_getm_notBefore, libcrypto),
-            Ptr{Cvoid},
-            (X509Certificate,),
-            x509_cert)
+        #am = ccall((:X509_getm_notBefore, libcrypto),
+        #    Ptr{Cvoid},
+        #    (X509Certificate,),
+        #    x509_cert)
 
-        am = ccall((:X509_gmtime_adj, libcrypto),
-            Ptr{Cvoid},
-            (Ptr{Cvoid}, Int64,),
-            am,
-            0)
+        #am = ccall((:X509_gmtime_adj, libcrypto),
+        #    Ptr{Cvoid},
+        #    (Ptr{Cvoid}, Int64,),
+        #    am,
+        #    0)
 
-        @show Asn1Time(am)
+        #@show Asn1Time(am)
 
-        af = ccall((:X509_getm_notAfter, libcrypto),
-            Ptr{Cvoid},
-            (X509Certificate,),
-            x509_cert)
+        #af = ccall((:X509_getm_notAfter, libcrypto),
+        #    Ptr{Cvoid},
+        #    (X509Certificate,),
+        #    x509_cert)
 
-        af = ccall((:X509_gmtime_adj, libcrypto),
-            Ptr{Cvoid},
-            (Ptr{Cvoid}, Int64,),
-            af,
-            31536000)
-        @show Asn1Time(af)
+        #af = ccall((:X509_gmtime_adj, libcrypto),
+        #    Ptr{Cvoid},
+        #    (Ptr{Cvoid}, Int64,),
+        #    af,
+        #    31536000)
+        #@show Asn1Time(af)
 
         finalizer(free, x509_cert)
         return x509_cert
@@ -1564,6 +1597,10 @@ function Base.String(big_num::BigNum)
 end
 
 function Base.String(asn1_time::Asn1Time)
+    if asn1_time.asn1_time == C_NULL
+        return "C_NULL"
+    end
+
     iob = IOBuffer()
     bio_stream = BIOStream(iob)
 
