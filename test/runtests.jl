@@ -136,3 +136,18 @@ seek(iob, 0)
 
 @show x509_name, String(x509_name)
 @show x509_certificate
+
+
+x = EVPCipherContext(EVPBlowFishCBC())
+OpenSSL.free(x)
+
+
+md_ctx = EVPDigestContext()
+digest_init(md_ctx, EVPMD5())
+
+in_data = read(IOBuffer("The quick brown fox jumps over the lazy dog"))
+digest_update(md_ctx, in_data)
+
+res = digest_final(md_ctx)
+@show res
+OpenSSL.free(md_ctx)

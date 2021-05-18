@@ -17,6 +17,11 @@ using Sockets
 export TLSv12ClientMethod, SSLStream, 
     BigNum, EvpPKey, RSA,
     Asn1Time, X509Name, X509Certificate,
+    EVPCipherContext,
+    EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB,
+    EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB,
+    EVPDigestContext, digest_init, digest_update, digest_final,
+    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1,
     rsa_generate_key,
     get_subject_name,
     add_entry, sign_certificate, adjust,
@@ -238,6 +243,7 @@ end
 
 const OPENSSL_INIT_SSL_DEFAULT = (OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS)
 
+#
 const MBSTRING_FLAG = 0x1000
 
 @enum(MBStringFlags::Int32,
@@ -245,6 +251,12 @@ const MBSTRING_FLAG = 0x1000
     MBSTRING_ASC = (MBSTRING_FLAG | 1),
     MBSTRING_BMP = (MBSTRING_FLAG | 2),
     MBSTRING_UNIV = (MBSTRING_FLAG | 4))
+
+# Longest known is SHA512.
+const EVP_MAX_MD_SIZE = 64
+const EVP_MAX_KEY_LENGTH = 64
+const EVP_MAX_IV_LENGTH = 16
+const EVP_MAX_BLOCK_LENGTH = 32
 
 # define RSA_3   0x3L
 # define RSA_F4  0x10001L
@@ -493,6 +505,9 @@ mutable struct EvpPKey
         evp_pkey = ccall((:EVP_PKEY_new, libcrypto),
             Ptr{Cvoid},
             ())
+        if evp_pkey == C_NULL
+            throw(OpenSSLException())
+        end
 
         evp_pkey = new(evp_pkey)
         finalizer(free, evp_pkey)
@@ -503,15 +518,16 @@ mutable struct EvpPKey
     function EvpPKey(rsa::RSA)::EvpPKey
         evp_pkey = EvpPKey()
 
-        result = ccall((:EVP_PKEY_assign, libcrypto),
-            Cint,
-            (EvpPKey, Cint, RSA,),
-            evp_pkey,
-            EVP_PKEY_RSA,
-            rsa)
+        if ccall((:EVP_PKEY_assign, libcrypto),
+                Cint,
+                (EvpPKey, Cint, RSA,),
+                evp_pkey,
+                EVP_PKEY_RSA,
+                rsa) == 0
+            throw(OpenSSLException())
+        end
 
         rsa.rsa = C_NULL
-
         return evp_pkey
     end
 end
@@ -537,11 +553,165 @@ end
     EVP_CIPHER.
 """
 mutable struct EVPCipher
-
+    evp_cipher::Ptr{Cvoid}
 end
+
+"""
+    Basic Block Cipher Modes:
+    - ECB Electronic Code Block
+    - CBC Cipher Block Chaining
+    - CFB Cipher Feedback
+    - OFB Output Feedback
+"""
+
+"""
+    Blowfish encryption algorithm in CBC, ECB, CFB and OFB modes.
+"""
+EVPBlowFishCBC()::EVPCipher = EVPCipher(ccall((:EVP_bf_cbc, libcrypto), Ptr{Cvoid}, ()))
+
+EVPBlowFishECB()::EVPCipher = EVPCipher(ccall((:EVP_bf_ecb, libcrypto), Ptr{Cvoid}, ()))
+
+EVPBlowFishCFB()::EVPCipher = EVPCipher(ccall((:EVP_bf_cfb, libcrypto), Ptr{Cvoid}, ()))
+
+EVPBlowFishOFB()::EVPCipher = EVPCipher(ccall((:EVP_bf_ofb, libcrypto), Ptr{Cvoid}, ()))
+
+
+"""
+    AES with a 128-bit key in CBC, ECB, CFB and OFB modes.
+"""
+EVPAES128CBC()::EVPCipher = EVPCipher(ccall((:EVP_aes_128_cbc, libcrypto), Ptr{Cvoid}, ()))
+
+EVPAES128ECB()::EVPCipher = EVPCipher(ccall((:EVP_aes_128_ecb, libcrypto), Ptr{Cvoid}, ()))
+
+EVPAES128CFB()::EVPCipher = EVPCipher(ccall((:EVP_aes_128_cfb, libcrypto), Ptr{Cvoid}, ()))
+
+EVPAES128OFB()::EVPCipher = EVPCipher(ccall((:EVP_aes_128_ofb, libcrypto), Ptr{Cvoid}, ()))
+
+"""
+    Null cipher, does nothing.
+"""
+EVPEncNull()::EVPCipher = EVPCipher(ccall((:EVP_enc_null, libcrypto), Ptr{Cvoid}, ()))
 
 mutable struct EVPCipherContext
     evp_cipher_ctx::Ptr{Cvoid}
+
+    function EVPCipherContext(evp_cipher::EVPCipher)
+        evp_cipher_ctx = ccall((:EVP_CIPHER_CTX_new, libcrypto), Ptr{Cvoid}, ())
+        if evp_cipher_ctx == C_NULL
+            throw(OpenSSLException())
+        end
+
+        evp_cipher_ctx = new(evp_cipher_ctx)
+        finalizer(free, evp_cipher_ctx)
+
+        ## TODO move
+        result = ccall((:EVP_CipherInit_ex, libcrypto),
+            Cint,
+            (EVPCipherContext, EVPCipher,),
+            evp_cipher_ctx, evp_cipher)
+
+        return evp_cipher_ctx
+    end
+end
+
+function free(evp_cipher_ctx::EVPCipherContext)
+    ccall((:EVP_CIPHER_CTX_free, libcrypto),
+        Cvoid,
+        (EVPCipherContext,),
+        evp_cipher_ctx)
+    evp_cipher_ctx.evp_cipher_ctx = C_NULL
+end
+
+"""
+    EVP Message Digest.
+"""
+mutable struct EVPDigest
+    evp_md::Ptr{Cvoid}
+end
+
+EVPMDNull()::EVPDigest = EVPDigest(ccall((:EVP_md_null, libcrypto), Ptr{Cvoid}, ()))
+
+EVPMD2()::EVPDigest = EVPDigest(ccall((:EVP_md2, libcrypto), Ptr{Cvoid}, ()))
+
+EVPMD5()::EVPDigest = EVPDigest(ccall((:EVP_md5, libcrypto), Ptr{Cvoid}, ()))
+
+EVPSHA1()::EVPDigest = EVPDigest(ccall((:EVP_sha1, libcrypto), Ptr{Cvoid}, ()))
+
+"""
+    EVP Message Digest Context.
+"""
+mutable struct EVPDigestContext
+    evp_md_ctx::Ptr{Cvoid}
+
+    function EVPDigestContext()
+        evp_digest_ctx = ccall((:EVP_MD_CTX_new, libcrypto), Ptr{Cvoid}, ())
+        if evp_digest_ctx == C_NULL
+            throw(OpenSSLException())
+        end
+
+        evp_digest_ctx = new(evp_digest_ctx)
+        finalizer(free, evp_digest_ctx)
+
+        return evp_digest_ctx
+    end
+end
+
+function free(evp_digest_ctx::EVPDigestContext)
+    ccall((:EVP_MD_CTX_free, libcrypto),
+            Cvoid,
+            (EVPDigestContext,),
+            evp_digest_ctx)
+    evp_digest_ctx.evp_md_ctx = C_NULL
+end
+
+function digest_init(
+    evp_digest_ctx::EVPDigestContext,
+    evp_digest::EVPDigest)
+
+    if ccall((:EVP_DigestInit_ex, libcrypto),
+            Cint,
+            (EVPDigestContext, EVPDigest, Ptr{Cvoid}, ),
+            evp_digest_ctx,
+            evp_digest,
+            C_NULL) == 0
+        throw(OpenSSLException())
+    end
+end
+
+function digest_update(
+    evp_digest_ctx::EVPDigestContext,
+    in_data::Vector{UInt8})
+
+    GC.@preserve in_data begin
+        if ccall((:EVP_DigestUpdate, libcrypto),
+                Cint,
+                (EVPDigestContext, Ptr{UInt8}, Csize_t, ),
+                evp_digest_ctx,
+                pointer(in_data),
+                length(in_data)) == 0
+            throw(OpenSSLException())
+        end
+    end
+end
+
+function digest_final(evp_digest_ctx::EVPDigestContext)::Vector{UInt8}
+    out_data = Vector{UInt8}(undef, EVP_MAX_MD_SIZE)
+    out_length = Ref{UInt32}(0)
+
+    GC.@preserve out_data out_length begin
+        if ccall((:EVP_DigestFinal_ex, libcrypto),
+                Cint,
+                (EVPDigestContext, Ptr{UInt8}, Ptr{UInt32}, ),
+                evp_digest_ctx,
+                pointer(out_data),
+                pointer_from_objref(out_length)) == 0
+            throw(OpenSSLException())
+        end
+    end
+
+    resize!(out_data, out_length.x)
+
+    return out_data
 end
 
 """
@@ -820,10 +990,22 @@ mutable struct SSLContext
             Ptr{Cvoid},
             (SSLMethod,),
             ssl_method)
-        context = new(ssl_ctx)
-        finalizer(free, context)
-        return context
+        if ssl_ctx == C_NULL
+            throw(OpenSSLException())
+        end
+
+        ssl_context = new(ssl_ctx)
+        finalizer(free, ssl_context)
+        return ssl_context
     end
+end
+
+function free(ssl_context::SSLContext)
+    ccall((:SSL_CTX_free, libssl),
+            Ptr{Cvoid},
+            (SSLContext,),
+            ssl_context)
+    ssl_context.ssl_ctx = C_NULL
 end
 
 """
@@ -850,14 +1032,6 @@ function set_alpn(ssl_context::SSLContext, protocol_list::String)
         pointer(protocol_list),
         length(protocol_list))
     println("set_alpn: $(protocol_list) $(result)")
-end
-
-function free(ssl_context::SSLContext)
-    ccall((:SSL_CTX_free, libssl),
-            Ptr{Cvoid},
-            (SSLContext,),
-            ssl_context)
-    ssl_context.ssl_ctx = C_NULL
 end
 
 """
@@ -1045,17 +1219,16 @@ function Base.String(x509_name::X509Name)::String
 end
 
 function add_entry(x509_name::X509Name, field::String, value::String)
-    result = ccall((:X509_NAME_add_entry_by_txt, libcrypto),
-        Cint,
-        (X509Name, Cstring, Cint, Cstring, Cint, Cint, Cint),
-        x509_name,
-        field,
-        MBSTRING_ASC,
-        value,
-        -1,
-        -1,
-        0)
-    if result == 0
+    if ccall((:X509_NAME_add_entry_by_txt, libcrypto),
+            Cint,
+            (X509Name, Cstring, Cint, Cstring, Cint, Cint, Cint),
+            x509_name,
+            field,
+            MBSTRING_ASC,
+            value,
+            -1,
+            -1,
+            0) == 0
         throw(OpenSSLException())
     end
 
@@ -1080,31 +1253,6 @@ mutable struct X509Certificate
     function X509Certificate(x509::Ptr{Cvoid})
         x509_cert = new(x509)
 
-        #am = ccall((:X509_getm_notBefore, libcrypto),
-        #    Ptr{Cvoid},
-        #    (X509Certificate,),
-        #    x509_cert)
-
-        #am = ccall((:X509_gmtime_adj, libcrypto),
-        #    Ptr{Cvoid},
-        #    (Ptr{Cvoid}, Int64,),
-        #    am,
-        #    0)
-
-        #@show Asn1Time(am)
-
-        #af = ccall((:X509_getm_notAfter, libcrypto),
-        #    Ptr{Cvoid},
-        #    (X509Certificate,),
-        #    x509_cert)
-
-        #af = ccall((:X509_gmtime_adj, libcrypto),
-        #    Ptr{Cvoid},
-        #    (Ptr{Cvoid}, Int64,),
-        #    af,
-        #    31536000)
-        #@show Asn1Time(af)
-
         finalizer(free, x509_cert)
         return x509_cert
     end
@@ -1127,6 +1275,9 @@ mutable struct X509Certificate
             C_NULL,
             C_NULL,
             C_NULL)
+        if x509 == C_NULL
+            throw(OpenSSLException())
+        end
 
         x509_cert = new(x509)
 
