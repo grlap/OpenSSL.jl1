@@ -595,7 +595,7 @@ EVPEncNull()::EVPCipher = EVPCipher(ccall((:EVP_enc_null, libcrypto), Ptr{Cvoid}
 mutable struct EVPCipherContext
     evp_cipher_ctx::Ptr{Cvoid}
 
-    function EVPCipherContext(evp_cipher::EVPCipher)
+    function EVPCipherContext()
         evp_cipher_ctx = ccall((:EVP_CIPHER_CTX_new, libcrypto), Ptr{Cvoid}, ())
         if evp_cipher_ctx == C_NULL
             throw(OpenSSLException())
@@ -603,12 +603,6 @@ mutable struct EVPCipherContext
 
         evp_cipher_ctx = new(evp_cipher_ctx)
         finalizer(free, evp_cipher_ctx)
-
-        ## TODO move
-        result = ccall((:EVP_CipherInit_ex, libcrypto),
-            Cint,
-            (EVPCipherContext, EVPCipher,),
-            evp_cipher_ctx, evp_cipher)
 
         return evp_cipher_ctx
     end
@@ -1680,7 +1674,7 @@ mutable struct OpenSSLInit
         result = ccall((:OPENSSL_init_crypto, libcrypto),
             Cint,
             (Cint, Ptr{Cvoid}),
-            Cint(OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ASYNC),
+            Cint(OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS | OPENSSL_INIT_ASYNC),
             C_NULL)
         @show result
 

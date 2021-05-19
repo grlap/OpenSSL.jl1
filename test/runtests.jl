@@ -137,10 +137,8 @@ seek(iob, 0)
 @show x509_name, String(x509_name)
 @show x509_certificate
 
-
-x = EVPCipherContext(EVPBlowFishCBC())
-OpenSSL.free(x)
-
+cipher_ctx = EVPCipherContext()
+OpenSSL.free(cipher_ctx)
 
 md_ctx = EVPDigestContext()
 digest_init(md_ctx, EVPMD5())
