@@ -84,10 +84,11 @@ end
     bio_stream = OpenSSL.BIOStream(tcp_stream)
     ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
 
-    # TODO expose connect
+    #TODO expose connect
     @show result = OpenSSL.connect(ssl_stream)
 
-    close(ssl_stream)
+    #TODO goot test
+    #close(ssl_stream)
 
     x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
 
@@ -100,52 +101,61 @@ end
 
     written = unsafe_write(ssl_stream, pointer(r), length(r))
 
-    @show eof(ssl_stream)
-    @show bytesavailable(ssl_stream)
-    #@show eof(ssl_stream)
-    #@show bytesavailable(ssl_stream)
     res = read(ssl_stream)
     @show String(res)
-    # Htt
+
+    close(ssl_stream)
+    finalize(ssl_ctx)
 end
 
-evp_pkey = EvpPKey(rsa_generate_key())
-x509_certificate = X509Certificate()
-x509_name = X509Name() # get_subject_name(x509_certificate)
-add_entry(x509_name, "C", "US")
-add_entry(x509_name, "ST", "Isles of Redmond")
-add_entry(x509_name, "CN", "www.redmond.com")
+@testset "Hash" begin
+    res = digest(EVPMD5(), IOBuffer("The quick brown fox jumps over the lazy dog"))
+    @show res
+end
 
-adjust(x509_certificate.time_not_before, Second(0))
-adjust(x509_certificate.time_not_after, Year(1))
+@testset "HashOnIOStream" begin
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
+    result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
-x509_certificate.subject_name = x509_name
-x509_certificate.issuer_name = x509_name
+    # Create SSL stream.
+    bio_stream = OpenSSL.BIOStream(connect("www.nghttp2.org", 443))
+    ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
 
-sign_certificate(x509_certificate, evp_pkey)
+    res = digest(EVPMD5(), ssl_stream)
+    @show res
+    close(ssl_stream)
+    finalize(ssl_ctx)
+end
 
-@show OpenSSL.get_time_not_before(x509_certificate)
-@show OpenSSL.get_time_not_after(x509_certificate)
+@testset "SelfSignedCert" begin
+    evp_pkey = EvpPKey(rsa_generate_key())
+    x509_certificate = X509Certificate()
+    x509_name = X509Name() # get_subject_name(x509_certificate)
+    add_entry(x509_name, "C", "US")
+    add_entry(x509_name, "ST", "Isles of Redmond")
+    add_entry(x509_name, "CN", "www.redmond.com")
 
-iob = IOBuffer()
+    adjust(x509_certificate.time_not_before, Second(0))
+    adjust(x509_certificate.time_not_after, Year(1))
 
-write(iob, x509_certificate)
+    x509_certificate.subject_name = x509_name
+    x509_certificate.issuer_name = x509_name
 
-seek(iob, 0)
-@show String(read(iob))
+    sign_certificate(x509_certificate, evp_pkey)
 
-@show x509_name, String(x509_name)
-@show x509_certificate
+    @show OpenSSL.get_time_not_before(x509_certificate)
+    @show OpenSSL.get_time_not_after(x509_certificate)
 
-cipher_ctx = EVPCipherContext()
-OpenSSL.free(cipher_ctx)
+    iob = IOBuffer()
 
-md_ctx = EVPDigestContext()
-digest_init(md_ctx, EVPMD5())
+    write(iob, x509_certificate)
 
-in_data = read(IOBuffer("The quick brown fox jumps over the lazy dog"))
-digest_update(md_ctx, in_data)
+    seek(iob, 0)
+    @show String(read(iob))
 
-res = digest_final(md_ctx)
-@show res
-OpenSSL.free(md_ctx)
+    @show x509_name, String(x509_name)
+    @show x509_certificate
+end
+
+
+

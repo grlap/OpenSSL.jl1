@@ -20,7 +20,7 @@ export TLSv12ClientMethod, SSLStream,
     EVPCipherContext,
     EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB,
     EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB,
-    EVPDigestContext, digest_init, digest_update, digest_final,
+    EVPDigestContext, digest_init, digest_update, digest_final, digest,
     EVPMDNull, EVPMD2, EVPMD5, EVPSHA1,
     rsa_generate_key,
     get_subject_name,
@@ -291,9 +291,9 @@ end
 
 function free(big_num_contex::BigNumContext)
     ccall((:BN_CTX_free, libcrypto),
-            Ptr{Cvoid},
-            (BigNumContext,),
-            big_num_contex)
+        Cvoid,
+        (BigNumContext,),
+        big_num_contex)
 
     big_num_contex.bn_ctx = C_NULL
 end
@@ -338,9 +338,9 @@ end
 
 function free(big_num::BigNum)
     ccall((:BN_free, libcrypto),
-            Ptr{Cvoid},
-            (BigNum,),
-            big_num)
+        Cvoid,
+        (BigNum,),
+        big_num)
 
     big_num.bn = C_NULL
 end
@@ -462,10 +462,8 @@ mutable struct RSA
 end
 
 function free(rsa::RSA)
-    println("free rsa $(rsa)")
-
     ccall((:RSA_free, libcrypto),
-        Ptr{Cvoid},
+        Cvoid,
         (RSA,),
         rsa)
 
@@ -533,9 +531,8 @@ mutable struct EvpPKey
 end
 
 function free(evp_pkey::EvpPKey)
-    println("free evp_pkey")
     ccall((:EVP_PKEY_free, libcrypto),
-        Ptr{Cvoid},
+        Cvoid,
         (EvpPKey,),
         evp_pkey)
 
@@ -613,6 +610,7 @@ function free(evp_cipher_ctx::EVPCipherContext)
         Cvoid,
         (EVPCipherContext,),
         evp_cipher_ctx)
+
     evp_cipher_ctx.evp_cipher_ctx = C_NULL
 end
 
@@ -652,9 +650,10 @@ end
 
 function free(evp_digest_ctx::EVPDigestContext)
     ccall((:EVP_MD_CTX_free, libcrypto),
-            Cvoid,
-            (EVPDigestContext,),
-            evp_digest_ctx)
+        Cvoid,
+        (EVPDigestContext,),
+        evp_digest_ctx)
+
     evp_digest_ctx.evp_md_ctx = C_NULL
 end
 
@@ -709,6 +708,27 @@ function digest_final(evp_digest_ctx::EVPDigestContext)::Vector{UInt8}
 end
 
 """
+    Computes the message digest (hash).
+"""
+function digest(evp_digest::EVPDigest, io::IO)
+    md_ctx = EVPDigestContext()
+
+    digest_init(md_ctx, EVPMD5())
+
+    while !eof(io)
+        available_bytes = bytesavailable(io)
+        in_data = read(io, available_bytes)
+        digest_update(md_ctx, in_data)
+    end
+
+    result = digest_final(md_ctx)
+
+    finalize(md_ctx)
+
+    return result
+end
+
+"""
     BIOStream.
 """
 mutable struct BIOStream <: IO
@@ -739,7 +759,7 @@ function bio_stream_from_data(bio::BIO)::BIOStream
     return bio_stream
 end
 
-function close(bio_stream::BIOStream)
+function Base.close(bio_stream::BIOStream)
     println("Close bio_stream")
 end
 
@@ -768,7 +788,6 @@ function on_bio_stream_create(bio::BIO)::Cint
 end
 
 function on_bio_stream_destroy(bio::BIO)::Cint
-    println("on_bio_stream_destroy $(bio)")
     return Cint(0)
 end
 
@@ -899,9 +918,10 @@ end
 
 function free(bio_method::BIOMethod)
     ccall((:BIO_meth_free, libcrypto),
-            Ptr{Cvoid},
-            (BIOMethod,),
-            bio_method)
+        Cvoid,
+        (BIOMethod,),
+        bio_method)
+
     bio_method.bio = C_NULL
 end
 
@@ -996,9 +1016,10 @@ end
 
 function free(ssl_context::SSLContext)
     ccall((:SSL_CTX_free, libssl),
-            Ptr{Cvoid},
-            (SSLContext,),
-            ssl_context)
+        Cvoid,
+        (SSLContext,),
+        ssl_context)
+
     ssl_context.ssl_ctx = C_NULL
 end
 
@@ -1039,10 +1060,15 @@ mutable struct SSL
             Ptr{Cvoid},
             (SSLContext,),
             ssl_context)
+        if ssl == C_NULL
+            throw(OpenSSLException())
+        end
+
         ssl = new(ssl)
+        finalizer(free, ssl)
 
         ccall((:SSL_set_bio, libssl),
-            Ptr{Cvoid},
+            Cvoid,
             (SSL, BIO, BIO),
             ssl,
             read_bio,
@@ -1050,6 +1076,15 @@ mutable struct SSL
 
         return ssl
     end
+end
+
+function free(ssl::SSL)
+    ccall((:SSL_free, libssl),
+        Cvoid,
+        (SSL,),
+        ssl)
+
+    ssl.ssl = C_NULL
 end
 
 function ssl_connect(ssl::SSL)::Cint
@@ -1078,6 +1113,15 @@ function ssl_accept(ssl::SSL)::Cint
         (SSL, Cint),
         ssl,
         1)
+
+    return result
+end
+
+function ssl_disconnect(ssl::SSL)::Cint
+    result = ccall((:SSL_shutdown, libssl),
+        Cint,
+        (SSL,),
+        ssl)
 
     return result
 end
@@ -1282,9 +1326,10 @@ end
 
 function free(x509_cert::X509Certificate)
     ccall((:X509_free, libcrypto),
-            Ptr{Cvoid},
-            (X509Certificate,),
-            x509_cert)
+        Cvoid,
+        (X509Certificate,),
+        x509_cert)
+
     x509_cert.x509 = C_NULL
 end
 
@@ -1640,6 +1685,19 @@ function Base.eof(ssl_stream::SSLStream)::Bool
 end
 
 """
+    Close SSL stream.
+"""
+function Base.close(ssl_stream::SSLStream)
+    println("Close ssl_stream")
+
+    # Ignore the disconnect result.
+    ssl_disconnect(ssl_stream.ssl)
+
+    close(ssl_stream.bio_read_stream)
+    close(ssl_stream.bio_write_stream)
+    finalize(ssl_stream.ssl)
+end
+"""
     Gets the X509 certificate of the peer.
 """
 function get_peer_certificate(ssl_stream::SSLStream)::Option{X509Certificate}
@@ -1653,12 +1711,6 @@ function get_peer_certificate(ssl_stream::SSLStream)::Option{X509Certificate}
     else
         return nothing
     end
-end
-
-function Base.close(ssl_stream::SSLStream)
-    println("Close ssl_stream")
-
-    close(ssl_stream.bio_read_stream)
 end
 
 """
@@ -1766,17 +1818,11 @@ function Base.String(asn1_time::Asn1Time)
     return String(read(iob))
 end
 
-function Base.show(io::IO, big_num::BigNum)
-    write(io, String(big_num))
-end
+show(io::IO, big_num::BigNum) = write(io, String(big_num))
 
-function Base.show(io::IO, asn1_time::Asn1Time)
-    write(io, String(asn1_time))
-end
+show(io::IO, asn1_time::Asn1Time) = write(io, String(asn1_time))
 
-function Base.show(io::IO, x509_name::X509Name)
-    write(io, String(x509_name))
-end
+show(io::IO, x509_name::X509Name) = write(io, String(x509_name))
 
 function Base.show(io::IO, x509_cert::X509Certificate)
     println(
