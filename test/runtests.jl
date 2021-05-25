@@ -5,6 +5,21 @@ using Test
 
 using MozillaCACerts_jll
 
+macro catch_exception_object(code)
+    quote
+        err = try
+            $(esc(code))
+            nothing
+        catch e
+            e
+        end
+        if err == nothing
+            error("Expected exception, got $err.")
+        end
+        err
+    end
+end
+
 # Verifies calling into OpenSSL library.
 @testset "OpenSSL" begin
     @test OpenSSL.OPEN_SSL_INIT.x.result == 1
@@ -95,16 +110,35 @@ end
     @test String(x509_server_cert.issuer_name) == "/C=US/O=Let's Encrypt/CN=R3"
     @test String(x509_server_cert.subject_name) == "/CN=nghttp2.org"
 
-    r = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
+    request_str = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
 
-    #ssl_stream = connect("www.nghttp2.org", 80)
+    written = unsafe_write(ssl_stream, pointer(request_str), length(request_str))
 
-    written = unsafe_write(ssl_stream, pointer(r), length(r))
-
-    res = read(ssl_stream)
-    @show String(res)
+    response = read(ssl_stream)
+    @show String(response)
 
     close(ssl_stream)
+    finalize(ssl_ctx)
+end
+
+@testset "ClosedConnection" begin
+    tcp_stream = connect("www.nghttp2.org", 443)
+
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
+    result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+
+    bio_stream = OpenSSL.BIOStream(tcp_stream)
+    ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
+
+    @show result = OpenSSL.connect(ssl_stream)
+
+    close(ssl_stream)
+
+    request_str = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
+    
+    err = @catch_exception_object unsafe_write(ssl_stream, pointer(request_str), length(request_str))
+    @test typeof(err) == Base.IOError
+
     finalize(ssl_ctx)
 end
 

@@ -540,13 +540,6 @@ function free(evp_pkey::EvpPKey)
 end
 
 """
-    BIO.
-"""
-mutable struct BIO
-    bio::Ptr{Cvoid}
-end
-
-"""
     EVP_CIPHER.
 """
 mutable struct EVPCipher
@@ -729,6 +722,13 @@ function digest(evp_digest::EVPDigest, io::IO)
 end
 
 """
+    BIO.
+"""
+mutable struct BIO
+    bio::Ptr{Cvoid}
+end
+
+"""
     BIOStream.
 """
 mutable struct BIOStream <: IO
@@ -737,10 +737,15 @@ mutable struct BIOStream <: IO
 
     BIOStream(bio::BIO) = new(bio, nothing)
 
-    BIOStream(io::IO) = new(OpenSSL.BIO(io), io)
+    BIOStream(io::IO) = new(BIO(io), io)
 end
 
 function bio_stream_set_data(bio_stream::BIOStream)
+    # Ensure the bio is valid.
+    if bio_stream.bio.bio == C_NULL
+        throw(Base.IOError("bio stream is closed or unusable", 0))
+    end
+
     ccall((:BIO_set_data, libcrypto),
         Cvoid,
         (BIO, Ptr{Cvoid},),
@@ -761,6 +766,8 @@ end
 
 function Base.close(bio_stream::BIOStream)
     println("Close bio_stream")
+
+    free(bio_stream.bio)
 end
 
 """
@@ -933,7 +940,12 @@ function BIO(io::IO)
         Ptr{Cvoid},
         (BIOMethod,),
         BIO_STREAM_METHOD.x)
+    if bio == C_NULL
+        throw(OpenSSLException())
+    end
+
     bio = BIO(bio)
+    finalizer(free, bio)
 
     ccall((:BIO_set_data, libcrypto),
         Cvoid,
@@ -965,16 +977,24 @@ function BIO(bio_method::BIOMethod)
         Ptr{Cvoid},
         (BIOMethod,),
         bio_method)
+    if bio == C_NULL
+        throw(OpenSSLException())
+    end
+
     bio = BIO(bio)
+    finalizer(free, bio)
 
     return bio
 end
 
-function verify(bio::BIO)
-    println("verify: $(bio)")
-    bio_stream = bio_stream_from_data(bio)
+function free(bio::BIO)
+    println("free bio $(bio)")
+    ccall((:BIO_free, libcrypto),
+        Cvoid,
+        (BIO,),
+        bio)
 
-    return bio == bio_stream.bio
+    bio.bio = C_NULL
 end
 
 """
@@ -1079,6 +1099,7 @@ mutable struct SSL
 end
 
 function free(ssl::SSL)
+    println("show ssl_free")
     ccall((:SSL_free, libssl),
         Cvoid,
         (SSL,),
@@ -1693,9 +1714,13 @@ function Base.close(ssl_stream::SSLStream)
     # Ignore the disconnect result.
     ssl_disconnect(ssl_stream.ssl)
 
-    close(ssl_stream.bio_read_stream)
-    close(ssl_stream.bio_write_stream)
     finalize(ssl_stream.ssl)
+
+    # SSL_free() also calls the free()ing procedures for indirectly affected items, 
+    # if applicable: the buffering BIO, the read and write BIOs, 
+    # cipher lists specially created for this ssl, the SSL_SESSION.
+    ssl_stream.bio_read_stream.bio.bio = C_NULL
+    ssl_stream.bio_write_stream.bio.bio = C_NULL
 end
 """
     Gets the X509 certificate of the peer.
