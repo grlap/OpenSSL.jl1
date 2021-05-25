@@ -94,10 +94,7 @@ end
     result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
     # Create SSL stream.
-    # #CHECK single BIO can be reused by multiple BIOStream
-
-    bio_stream = OpenSSL.BIOStream(tcp_stream)
-    ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
+    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
     #TODO expose connect
     @show result = OpenSSL.connect(ssl_stream)
@@ -127,8 +124,7 @@ end
     ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
     result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
-    bio_stream = OpenSSL.BIOStream(tcp_stream)
-    ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
+    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
     @show result = OpenSSL.connect(ssl_stream)
 

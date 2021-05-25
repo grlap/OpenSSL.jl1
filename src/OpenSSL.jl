@@ -6,10 +6,10 @@ using OpenSSL_jll
 using Sockets
 
 """
-    [ ] Free BIO
+    [x] Free BIO
     [ ] Free BIOMethod
-    [ ] Free on BIOStream
-    [ ] Close SSLContext
+    [x] Free on BIOStream
+    [x] Close SSLContext
     [x] BIOStream method (callbacks)
     [x] Store the SSLContext (part of SSLStream)
 """
@@ -779,10 +779,6 @@ mutable struct BIOMethod
             bio_meth,
             BIO_STREAM_CALLBACKS.x.on_bio_ctrl_ptr)
 
-"""
-    BIO_meth_set_create(methods_bufferevent, bio_bufferevent_new);
-    BIO_meth_set_destroy(methods_bufferevent, bio_bufferevent_free);
-"""
         return new(bio_meth)
     end
 end
@@ -863,9 +859,7 @@ function on_bio_stream_create(bio::BIO)::Cint
     return Cint(1)
 end
 
-function on_bio_stream_destroy(bio::BIO)::Cint
-    return Cint(0)
-end
+on_bio_stream_destroy(bio::BIO)::Cint = Cint(0)
 
 function on_bio_stream_read(bio::BIO, out::Ptr{Cchar}, outlen::Cint)::Cint
     bio_stream = bio_stream_from_data(bio)
@@ -900,7 +894,7 @@ mutable struct BIOStream <: IO
 
     BIOStream(bio::BIO) = new(bio, nothing)
 
-    BIOStream(io::IO) = new(BIO(io), io)
+    BIOStream(io::IO) = new(BIO(), io)
 end
 
 function bio_stream_set_data(bio_stream::BIOStream)
@@ -932,7 +926,7 @@ close(bio_stream::BIOStream) = free(bio_stream.bio)
 """
     Creates BIO Stream on IO object.
 """
-function BIO(io::IO)
+function BIO()
     bio = ccall((:BIO_new, libcrypto),
         Ptr{Cvoid},
         (BIOMethod,),
@@ -1524,10 +1518,13 @@ struct SSLStream <: IO
     bio_write_stream::BIOStream
     lock::ReentrantLock
 
-    function SSLStream(ssl_context::SSLContext, bio_stream_read::BIOStream, bio_stream_write::BIOStream)
-        ssl = SSL(ssl_context, bio_stream_read.bio, bio_stream_write.bio)
+    function SSLStream(ssl_context::SSLContext, read_stream::IO, write_stream::IO)
+        bio_read_stream = BIOStream(read_stream)
+        bio_write_stream = BIOStream(write_stream)
 
-        return new(ssl, ssl_context, bio_stream_read, bio_stream_write, ReentrantLock())
+        ssl = SSL(ssl_context, bio_read_stream.bio, bio_write_stream.bio)
+
+        return new(ssl, ssl_context, bio_read_stream, bio_write_stream, ReentrantLock())
     end
 end
 
