@@ -721,120 +721,6 @@ function digest(evp_digest::EVPDigest, io::IO)
     return result
 end
 
-"""
-    BIO.
-"""
-mutable struct BIO
-    bio::Ptr{Cvoid}
-end
-
-"""
-    BIOStream.
-"""
-mutable struct BIOStream <: IO
-    bio::BIO
-    io::Option{IO}
-
-    BIOStream(bio::BIO) = new(bio, nothing)
-
-    BIOStream(io::IO) = new(BIO(io), io)
-end
-
-function bio_stream_set_data(bio_stream::BIOStream)
-    # Ensure the bio is valid.
-    if bio_stream.bio.bio == C_NULL
-        throw(Base.IOError("bio stream is closed or unusable", 0))
-    end
-
-    ccall((:BIO_set_data, libcrypto),
-        Cvoid,
-        (BIO, Ptr{Cvoid},),
-        bio_stream.bio,
-        pointer_from_objref(bio_stream))
-end
-
-function bio_stream_from_data(bio::BIO)::BIOStream
-    user_data::Ptr{Cvoid} = ccall((:BIO_get_data, libcrypto),
-        Ptr{Cvoid},
-        (BIO,),
-        bio)
-
-    bio_stream::BIOStream = unsafe_pointer_to_objref(user_data)
-
-    return bio_stream
-end
-
-function Base.close(bio_stream::BIOStream)
-    println("Close bio_stream")
-
-    free(bio_stream.bio)
-end
-
-"""
-    BIO Stream callbacks.
-"""
-
-"""
-    Called to initialize new BIO Stream object.
-"""
-function on_bio_stream_create(bio::BIO)::Cint
-    # Initalize BIO.
-    ccall((:BIO_set_init, libcrypto),
-        Cvoid,
-        (BIO, Cint),
-        bio,
-        0)
-
-    ccall((:BIO_set_data, libcrypto),
-        Cvoid,
-        (BIO, Cint),
-        bio,
-        C_NULL)
-
-    return Cint(1)
-end
-
-function on_bio_stream_destroy(bio::BIO)::Cint
-    return Cint(0)
-end
-
-function on_bio_stream_read(bio::BIO, out::Ptr{Cchar}, outlen::Cint)::Cint
-    bio_stream = bio_stream_from_data(bio)
-    eof(bio_stream.io)
-    available_bytes = bytesavailable(bio_stream.io)
-
-    outlen = min(outlen, available_bytes)
-
-    unsafe_read(bio_stream.io, out, outlen)
-
-    return outlen
-end
-
-function on_bio_stream_write(bio::BIO, in::Ptr{Cchar}, inlen::Cint)::Cint
-    bio_stream = bio_stream_from_data(bio)
-
-    written = unsafe_write(bio_stream.io, in, inlen)
-
-    return Cint(written)
-end
-
-on_bio_stream_puts(bio::BIO, in::Ptr{Cchar})::Cint = Cint(0)
-
-on_bio_stream_ctrl(bio::BIO, cmd::BIOCtrl, num::Int64, ptr::Ptr{Cvoid})::Int64 = 1
-
-"""
-    BIO write.
-"""
-function Base.unsafe_write(bio::BIO, out_buffer::Ptr{UInt8}, out_length::Int)
-    result = ccall((:BIO_write, libcrypto),
-        Cint,
-        (BIO, Ptr{Cvoid}, Cint),
-        bio,
-        out_buffer,
-        out_length)
-
-    return result
-end
 
 """
     OpenSSL BIOMethod.
@@ -931,6 +817,117 @@ function free(bio_method::BIOMethod)
 
     bio_method.bio = C_NULL
 end
+
+"""
+    BIO.
+"""
+mutable struct BIO
+    bio::Ptr{Cvoid}
+end
+
+"""
+    BIO write.
+"""
+function Base.unsafe_write(bio::BIO, out_buffer::Ptr{UInt8}, out_length::Int)
+    result = ccall((:BIO_write, libcrypto),
+        Cint,
+        (BIO, Ptr{Cvoid}, Cint),
+        bio,
+        out_buffer,
+        out_length)
+
+    return result
+end
+
+"""
+    BIO Stream callbacks.
+"""
+
+"""
+    Called to initialize new BIO Stream object.
+"""
+function on_bio_stream_create(bio::BIO)::Cint
+    # Initalize BIO.
+    ccall((:BIO_set_init, libcrypto),
+        Cvoid,
+        (BIO, Cint),
+        bio,
+        0)
+
+    ccall((:BIO_set_data, libcrypto),
+        Cvoid,
+        (BIO, Cint),
+        bio,
+        C_NULL)
+
+    return Cint(1)
+end
+
+function on_bio_stream_destroy(bio::BIO)::Cint
+    return Cint(0)
+end
+
+function on_bio_stream_read(bio::BIO, out::Ptr{Cchar}, outlen::Cint)::Cint
+    bio_stream = bio_stream_from_data(bio)
+    eof(bio_stream.io)
+    available_bytes = bytesavailable(bio_stream.io)
+
+    outlen = min(outlen, available_bytes)
+
+    unsafe_read(bio_stream.io, out, outlen)
+
+    return outlen
+end
+
+function on_bio_stream_write(bio::BIO, in::Ptr{Cchar}, inlen::Cint)::Cint
+    bio_stream = bio_stream_from_data(bio)
+
+    written = unsafe_write(bio_stream.io, in, inlen)
+
+    return Cint(written)
+end
+
+on_bio_stream_puts(bio::BIO, in::Ptr{Cchar})::Cint = Cint(0)
+
+on_bio_stream_ctrl(bio::BIO, cmd::BIOCtrl, num::Int64, ptr::Ptr{Cvoid})::Int64 = 1
+
+"""
+    BIOStream.
+"""
+mutable struct BIOStream <: IO
+    bio::BIO
+    io::Option{IO}
+
+    BIOStream(bio::BIO) = new(bio, nothing)
+
+    BIOStream(io::IO) = new(BIO(io), io)
+end
+
+function bio_stream_set_data(bio_stream::BIOStream)
+    # Ensure the BIO is valid.
+    if bio_stream.bio.bio == C_NULL
+        throw(Base.IOError("bio stream is closed or unusable", 0))
+    end
+
+    ccall((:BIO_set_data, libcrypto),
+        Cvoid,
+        (BIO, Ptr{Cvoid},),
+        bio_stream.bio,
+        pointer_from_objref(bio_stream))
+end
+
+function bio_stream_from_data(bio::BIO)::BIOStream
+    user_data::Ptr{Cvoid} = ccall((:BIO_get_data, libcrypto),
+        Ptr{Cvoid},
+        (BIO,),
+        bio)
+
+    bio_stream::BIOStream = unsafe_pointer_to_objref(user_data)
+
+    return bio_stream
+end
+
+close(bio_stream::BIOStream) = free(bio_stream.bio)
 
 """
     Creates BIO Stream on IO object.
