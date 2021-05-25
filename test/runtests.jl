@@ -99,9 +99,6 @@ end
     #TODO expose connect
     @show result = OpenSSL.connect(ssl_stream)
 
-    #TODO goot test
-    #close(ssl_stream)
-
     x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
 
     @test String(x509_server_cert.issuer_name) == "/C=US/O=Let's Encrypt/CN=R3"
@@ -128,6 +125,7 @@ end
 
     @show result = OpenSSL.connect(ssl_stream)
 
+    # Close the ssl stream.
     close(ssl_stream)
 
     request_str = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
@@ -148,8 +146,8 @@ end
     result = OpenSSL.set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
     # Create SSL stream.
-    bio_stream = OpenSSL.BIOStream(connect("www.nghttp2.org", 443))
-    ssl_stream = SSLStream(ssl_ctx, bio_stream, bio_stream)
+    tcp_stream = connect("www.nghttp2.org", 443)
+    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
     res = digest(EVPMD5(), ssl_stream)
     @show res
@@ -186,6 +184,3 @@ end
     @show x509_name, String(x509_name)
     @show x509_certificate
 end
-
-
-

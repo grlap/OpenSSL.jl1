@@ -819,7 +819,74 @@ end
 """
 mutable struct BIO
     bio::Ptr{Cvoid}
+
+    """
+        Creates a BIO object using IO stream method.
+        The BIO object is not registered with the finalizer.
+    """
+    function BIO()
+        bio = ccall((:BIO_new, libcrypto),
+            Ptr{Cvoid},
+            (BIOMethod,),
+            BIO_STREAM_METHOD.x)
+        if bio == C_NULL
+            throw(OpenSSLException())
+        end
+
+        bio = new(bio)
+        finalizer(free, bio)
+
+        ccall((:BIO_set_data, libcrypto),
+            Cvoid,
+            (BIO, Ptr{Cvoid}),
+            bio,
+            C_NULL)
+
+        # Mark BIO as initalized.
+        ccall((:BIO_set_init, libcrypto),
+            Cvoid,
+            (BIO, Cint),
+            bio,
+            1)
+
+        ccall((:BIO_set_shutdown, libcrypto),
+            Cvoid,
+            (BIO, Cint),
+            bio,
+            0)
+
+        return bio
+    end
+
+    """
+        Creates BIO for given BIOMethod.
+    """
+    function BIO(bio_method::BIOMethod)
+        bio =  ccall((:BIO_new, libcrypto),
+            Ptr{Cvoid},
+            (BIOMethod,),
+            bio_method)
+        if bio == C_NULL
+            throw(OpenSSLException())
+        end
+
+        bio = new(bio)
+        finalizer(free, bio)
+
+        return bio
+    end
 end
+
+function free(bio::BIO)
+    ccall((:BIO_free, libcrypto),
+        Cvoid,
+        (BIO,),
+        bio)
+
+   bio.bio = C_NULL
+end
+
+clear(bio::BIO) = bio.bio
 
 """
     BIO write.
@@ -892,8 +959,6 @@ mutable struct BIOStream <: IO
     bio::BIO
     io::Option{IO}
 
-    BIOStream(bio::BIO) = new(bio, nothing)
-
     BIOStream(io::IO) = new(BIO(), io)
 end
 
@@ -922,71 +987,6 @@ function bio_stream_from_data(bio::BIO)::BIOStream
 end
 
 close(bio_stream::BIOStream) = free(bio_stream.bio)
-
-"""
-    Creates BIO Stream on IO object.
-"""
-function BIO()
-    bio = ccall((:BIO_new, libcrypto),
-        Ptr{Cvoid},
-        (BIOMethod,),
-        BIO_STREAM_METHOD.x)
-    if bio == C_NULL
-        throw(OpenSSLException())
-    end
-
-    bio = BIO(bio)
-    finalizer(free, bio)
-
-    ccall((:BIO_set_data, libcrypto),
-        Cvoid,
-        (BIO, Ptr{Cvoid}),
-        bio,
-        C_NULL)
-
-    # Mark BIO as initalized.
-    ccall((:BIO_set_init, libcrypto),
-        Cvoid,
-        (BIO, Cint),
-        bio,
-        1)
-
-    ccall((:BIO_set_shutdown, libcrypto),
-        Cvoid,
-        (BIO, Cint),
-        bio,
-        0)
-
-    return bio
-end
-
-"""
-    Creates BIO for given BIOMethod.
-"""
-function BIO(bio_method::BIOMethod)
-    bio =  ccall((:BIO_new, libcrypto),
-        Ptr{Cvoid},
-        (BIOMethod,),
-        bio_method)
-    if bio == C_NULL
-        throw(OpenSSLException())
-    end
-
-    bio = BIO(bio)
-    finalizer(free, bio)
-
-    return bio
-end
-
-function free(bio::BIO)
-    println("free bio $(bio)")
-    ccall((:BIO_free, libcrypto),
-        Cvoid,
-        (BIO,),
-        bio)
-
-    bio.bio = C_NULL
-end
 
 """
     SSLMethod.
@@ -1090,7 +1090,6 @@ mutable struct SSL
 end
 
 function free(ssl::SSL)
-    println("show ssl_free")
     ccall((:SSL_free, libssl),
         Cvoid,
         (SSL,),
@@ -1524,6 +1523,10 @@ struct SSLStream <: IO
 
         ssl = SSL(ssl_context, bio_read_stream.bio, bio_write_stream.bio)
 
+        # On finalize call first clear function, to ensure BIO_free will not be called.
+        finalizer(clear, bio_read_stream.bio)
+        finalizer(clear, bio_write_stream.bio)
+
         return new(ssl, ssl_context, bio_read_stream, bio_write_stream, ReentrantLock())
     end
 end
@@ -1708,13 +1711,13 @@ function Base.close(ssl_stream::SSLStream)
     # Ignore the disconnect result.
     ssl_disconnect(ssl_stream.ssl)
 
-    finalize(ssl_stream.ssl)
-
     # SSL_free() also calls the free()ing procedures for indirectly affected items, 
     # if applicable: the buffering BIO, the read and write BIOs, 
     # cipher lists specially created for this ssl, the SSL_SESSION.
     ssl_stream.bio_read_stream.bio.bio = C_NULL
     ssl_stream.bio_write_stream.bio.bio = C_NULL
+
+    finalize(ssl_stream.ssl)
 end
 """
     Gets the X509 certificate of the peer.
