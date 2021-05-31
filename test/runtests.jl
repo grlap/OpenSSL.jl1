@@ -69,7 +69,7 @@ end
     @show asn1_time
 end
 
-function test()
+@testset "ReadPEMCert" begin
     file_handle = open(MozillaCACerts_jll.cacert)
     file_content = String(read(file_handle))
     close(file_handle)
@@ -82,6 +82,8 @@ function test()
     x509_cert = OpenSSL.X509Certificate(cert)
     @test String(x509_cert.subject_name) == "/C=BE/O=GlobalSign nv-sa/OU=Root CA/CN=GlobalSign Root CA"
     @test String(x509_cert.issuer_name) == "/C=BE/O=GlobalSign nv-sa/OU=Root CA/CN=GlobalSign Root CA"
+    @test String(x509_cert.time_not_before) == "Sep  1 12:00:00 1998 GMT"
+    @test String(x509_cert.time_not_after) == "Jan 28 12:00:00 2028 GMT"
 end
 
 @testset "HttpsConnect" begin
@@ -94,7 +96,7 @@ end
     ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
     #TODO expose connect
-    @show result = OpenSSL.connect(ssl_stream)
+    OpenSSL.connect(ssl_stream)
 
     x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
 
@@ -117,11 +119,13 @@ end
 
     ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
     result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+    @show result
+    result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+    @show result
 
     ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
-    result = OpenSSL.connect(ssl_stream)
-    @show result
+    OpenSSL.connect(ssl_stream)
 
     # Close the ssl stream.
     close(ssl_stream)
@@ -156,7 +160,7 @@ end
 @testset "SelfSignedCert" begin
     evp_pkey = EvpPKey(rsa_generate_key())
     x509_certificate = X509Certificate()
-    x509_name = X509Name() # get_subject_name(x509_certificate)
+    x509_name = X509Name()
     add_entry(x509_name, "C", "US")
     add_entry(x509_name, "ST", "Isles of Redmond")
     add_entry(x509_name, "CN", "www.redmond.com")
@@ -181,4 +185,10 @@ end
 
     @show x509_name, String(x509_name)
     @show x509_certificate
+
+    # X509 store.
+    x509_store = X509Store()
+    add_cert(x509_store, x509_certificate)
+    free(x509_store)
+    free(x509_certificate)
 end
