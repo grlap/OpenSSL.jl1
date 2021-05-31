@@ -14,7 +14,7 @@ using Sockets
     [x] Store the SSLContext (part of SSLStream)
 """
 
-export TLSv12ClientMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate, X509Store, EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB,
+export TLSv12ClientMethod, TLSv12ServerMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate, X509Store, EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB,
        EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest, EVPMDNull, EVPMD2, EVPMD5,
        EVPSHA1, rsa_generate_key, add_entry, sign_certificate, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read, unsafe_write, connect, get_peer_certificate,
        free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
@@ -421,6 +421,8 @@ mutable struct RSA
 end
 
 function free(rsa::RSA)
+    println("free rsa")
+
     ccall((:RSA_free, libcrypto), Cvoid, (RSA,), rsa)
 
     return rsa.rsa = C_NULL
@@ -475,6 +477,8 @@ mutable struct EvpPKey
 end
 
 function free(evp_pkey::EvpPKey)
+    println("free evp")
+
     ccall((:EVP_PKEY_free, libcrypto), Cvoid, (EvpPKey,), evp_pkey)
 
     return evp_pkey.evp_pkey = C_NULL
@@ -823,119 +827,6 @@ end
 close(bio_stream::BIOStream) = free(bio_stream.bio)
 
 """
-    SSLMethod.
-    TLSv12ClientMethod.
-"""
-mutable struct SSLMethod
-    ssl_method::Ptr{Cvoid}
-end
-
-function TLSv12ClientMethod()
-    ssl_method = ccall((:TLSv1_2_client_method, libssl), Ptr{Cvoid}, ())
-    return SSLMethod(ssl_method)
-end
-
-"""
-    This is the global context structure which is created by a server or client once per program life-time
-    and which holds mainly default values for the SSL structures which are later created for the connections.
-"""
-mutable struct SSLContext
-    ssl_ctx::Ptr{Cvoid}
-
-    function SSLContext(ssl_method::SSLMethod)
-        ssl_ctx = ccall((:SSL_CTX_new, libssl), Ptr{Cvoid}, (SSLMethod,), ssl_method)
-        if ssl_ctx == C_NULL
-            throw(OpenSSLException())
-        end
-
-        ssl_context = new(ssl_ctx)
-        finalizer(free, ssl_context)
-        return ssl_context
-    end
-end
-
-function free(ssl_context::SSLContext)
-    ccall((:SSL_CTX_free, libssl), Cvoid, (SSLContext,), ssl_context)
-
-    return ssl_context.ssl_ctx = C_NULL
-end
-
-"""
-    Sets the (external) protocol behaviour of the SSL library.
-"""
-function ssl_set_options(ssl_context::SSLContext, options::SSLOptions)
-    return ccall((:SSL_CTX_set_options, libssl), UInt64, (SSLContext, UInt64), ssl_context, options)
-end
-
-"""
-    Configures TLS ALPN (Application-Layer Protocol Negotiation).
-"""
-function ssl_set_alpn(ssl_context::SSLContext, protocol_list::String)::Cint
-    return ccall((:SSL_CTX_set_alpn_protos, libssl), Cint, (SSLContext, Ptr{UInt8}, UInt32), ssl_context, pointer(protocol_list), length(protocol_list))
-end
-
-# TODO
-# int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str);
-
-"""
-    Configures available TLSv1.3 ciphersuites.
-"""
-function ssl_set_ciphersuites(ssl_context::SSLContext, cipher_suites::String)
-    return ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (SSLContext, Cstring), ssl_context, cipher_suites)
-end
-
-"""
-    SSL structure for a connection.
-"""
-mutable struct SSL
-    ssl::Ptr{Cvoid}
-
-    function SSL(ssl_context::SSLContext, read_bio::BIO, write_bio::BIO)::SSL
-        ssl = ccall((:SSL_new, libssl), Ptr{Cvoid}, (SSLContext,), ssl_context)
-        if ssl == C_NULL
-            throw(OpenSSLException())
-        end
-
-        ssl = new(ssl)
-        finalizer(free, ssl)
-
-        ccall((:SSL_set_bio, libssl), Cvoid, (SSL, BIO, BIO), ssl, read_bio, write_bio)
-
-        return ssl
-    end
-end
-
-function free(ssl::SSL)
-    ccall((:SSL_free, libssl), Cvoid, (SSL,), ssl)
-
-    return ssl.ssl = C_NULL
-end
-
-function ssl_connect(ssl::SSL)
-    result = ccall((:SSL_connect, libssl), Cint, (SSL,), ssl)
-
-    ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
-
-    return result
-end
-
-function ssl_accept(ssl::SSL)::Cint
-    result = ccall((:SSL_accept, libssl), Cint, (SSL,), ssl)
-
-    ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
-
-    return result
-end
-
-function ssl_disconnect(ssl::SSL)
-    return ccall((:SSL_shutdown, libssl), Cint, (SSL,), ssl)
-end
-
-function get_error(ssl::SSL, ret::Cint)::Cint
-    return ccall((:SSL_get_error, libssl), Cint, (SSL, Cint), ssl, ret)
-end
-
-"""
     ASN1_TIME.
 """
 mutable struct Asn1Time
@@ -1004,6 +895,8 @@ mutable struct X509Name
 end
 
 function free(x509_name::X509Name)
+    println("free x509")
+
     ccall((:X509_NAME_free, libcrypto), Cvoid, (X509Name,), x509_name)
 
     return x509_name.x509_name = C_NULL
@@ -1073,6 +966,8 @@ mutable struct X509Certificate
 end
 
 function free(x509_cert::X509Certificate)
+    println("free x509_cert")
+
     ccall((:X509_free, libcrypto), Cvoid, (X509Certificate,), x509_cert)
 
     return x509_cert.x509 = C_NULL
@@ -1221,6 +1116,147 @@ function add_cert(x509_store::X509Store, x509_certificate::X509Certificate)
     if ccall((:X509_STORE_add_cert, libcrypto), Cint, (X509Store, X509Certificate), x509_store, x509_certificate) != 1
         throw(OpenSSLException())
     end
+end
+
+
+"""
+    SSLMethod.
+    TLSv12ClientMethod.
+"""
+mutable struct SSLMethod
+    ssl_method::Ptr{Cvoid}
+end
+
+function TLSv12ClientMethod()
+    ssl_method = ccall((:TLSv1_2_client_method, libssl), Ptr{Cvoid}, ())
+    if ssl_method == C_NULL
+        throw(OpenSSLException())
+    end
+
+    return SSLMethod(ssl_method)
+end
+
+function TLSv12ServerMethod()
+    ssl_method = ccall((:TLSv1_2_server_method, libssl), Ptr{Cvoid}, ())
+    if ssl_method == C_NULL
+        throw(OpenSSLException())
+    end
+
+    return SSLMethod(ssl_method)
+end
+
+"""
+    This is the global context structure which is created by a server or client once per program life-time
+    and which holds mainly default values for the SSL structures which are later created for the connections.
+"""
+mutable struct SSLContext
+    ssl_ctx::Ptr{Cvoid}
+
+    function SSLContext(ssl_method::SSLMethod)
+        ssl_ctx = ccall((:SSL_CTX_new, libssl), Ptr{Cvoid}, (SSLMethod,), ssl_method)
+        if ssl_ctx == C_NULL
+            throw(OpenSSLException())
+        end
+
+        ssl_context = new(ssl_ctx)
+        finalizer(free, ssl_context)
+        return ssl_context
+    end
+end
+
+function free(ssl_context::SSLContext)
+    println("free ssl_context $(ssl_context)")
+    ccall((:SSL_CTX_free, libssl), Cvoid, (SSLContext,), ssl_context)
+
+    return ssl_context.ssl_ctx = C_NULL
+end
+
+"""
+    Sets the (external) protocol behaviour of the SSL library.
+"""
+function ssl_set_options(ssl_context::SSLContext, options::SSLOptions)
+    return ccall((:SSL_CTX_set_options, libssl), UInt64, (SSLContext, UInt64), ssl_context, options)
+end
+
+"""
+    Configures TLS ALPN (Application-Layer Protocol Negotiation).
+"""
+function ssl_set_alpn(ssl_context::SSLContext, protocol_list::String)::Cint
+    return ccall((:SSL_CTX_set_alpn_protos, libssl), Cint, (SSLContext, Ptr{UInt8}, UInt32), ssl_context, pointer(protocol_list), length(protocol_list))
+end
+
+# TODO
+# int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str);
+
+"""
+    Configures available TLSv1.3 ciphersuites.
+"""
+function ssl_set_ciphersuites(ssl_context::SSLContext, cipher_suites::String)
+    return ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (SSLContext, Cstring), ssl_context, cipher_suites)
+end
+
+function ssl_use_certificate(ssl_context::SSLContext, x509_cert::X509Certificate)
+    return ccall((:SSL_CTX_use_certificate, libssl), Cint, (SSLContext, X509Certificate), ssl_context, x509_cert)
+end
+
+function ssl_use_private_key(ssl_context::SSLContext, evp_pkey::EvpPKey)
+    return ccall((:SSL_CTX_use_PrivateKey, libssl), Cint, (SSLContext, EvpPKey), ssl_context, evp_pkey)
+end
+
+"""
+    SSL structure for a connection.
+"""
+mutable struct SSL
+    ssl::Ptr{Cvoid}
+
+    function SSL(ssl_context::SSLContext, read_bio::BIO, write_bio::BIO)::SSL
+        ssl = ccall((:SSL_new, libssl), Ptr{Cvoid}, (SSLContext,), ssl_context)
+        if ssl == C_NULL
+            throw(OpenSSLException())
+        end
+
+        ssl = new(ssl)
+        finalizer(free, ssl)
+
+        ccall((:SSL_set_bio, libssl), Cvoid, (SSL, BIO, BIO), ssl, read_bio, write_bio)
+
+        return ssl
+    end
+end
+
+function free(ssl::SSL)
+    println("free ssl $(ssl)")
+
+    #TODO
+    # ssl_disconnect(ssl)
+
+    ccall((:SSL_free, libssl), Cvoid, (SSL,), ssl)
+
+    return ssl.ssl = C_NULL
+end
+
+function ssl_connect(ssl::SSL)
+    result = ccall((:SSL_connect, libssl), Cint, (SSL,), ssl)
+
+    ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
+
+    return result
+end
+
+function ssl_accept(ssl::SSL)::Cint
+    result = ccall((:SSL_accept, libssl), Cint, (SSL,), ssl)
+
+    ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
+
+    return result
+end
+
+function ssl_disconnect(ssl::SSL)
+    return ccall((:SSL_shutdown, libssl), Cint, (SSL,), ssl)
+end
+
+function get_error(ssl::SSL, ret::Cint)::Cint
+    return ccall((:SSL_get_error, libssl), Cint, (SSL, Cint), ssl, ret)
 end
 
 """

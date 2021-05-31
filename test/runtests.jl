@@ -153,8 +153,8 @@ end
 
     res = digest(EVPMD5(), ssl_stream)
     @show res
-    close(ssl_stream)
-    finalize(ssl_ctx)
+    #close(ssl_stream)
+    #finalize(ssl_ctx)
 end
 
 @testset "SelfSignedCert" begin
@@ -173,11 +173,7 @@ end
 
     sign_certificate(x509_certificate, evp_pkey)
 
-    @show OpenSSL.get_time_not_before(x509_certificate)
-    @show OpenSSL.get_time_not_after(x509_certificate)
-
     iob = IOBuffer()
-
     write(iob, x509_certificate)
 
     seek(iob, 0)
@@ -191,4 +187,79 @@ end
     add_cert(x509_store, x509_certificate)
     free(x509_store)
     free(x509_certificate)
+end
+
+function test_server()
+    evp_pkey = EvpPKey(rsa_generate_key())
+    x509_certificate = X509Certificate()
+    x509_name = X509Name()
+    add_entry(x509_name, "C", "US")
+    add_entry(x509_name, "ST", "Isles of Redmond")
+    add_entry(x509_name, "CN", "www.redmond.com")
+
+    adjust(x509_certificate.time_not_before, Second(0))
+    adjust(x509_certificate.time_not_after, Year(1))
+
+    x509_certificate.subject_name = x509_name
+    x509_certificate.issuer_name = x509_name
+
+    sign_certificate(x509_certificate, evp_pkey)
+
+
+    server_socket = listen(5000)
+    accepted_socket = accept(server_socket)
+
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
+    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+    @show result
+    #result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+    #@show result
+
+    result = OpenSSL.ssl_use_certificate(ssl_ctx, x509_certificate)
+    @show result
+
+    result = OpenSSL.ssl_use_private_key(ssl_ctx, evp_pkey)
+    @show result
+
+    ssl_stream = SSLStream(ssl_ctx, accepted_socket, accepted_socket)
+    @show ssl_stream
+
+    OpenSSL.accept(ssl_stream)
+
+    eof(ssl_stream)
+    av = bytesavailable(ssl_stream)
+    x = read(ssl_stream, av)
+    @show x
+
+    close(ssl_stream)
+    finalize(ssl_ctx)
+
+end
+
+function test_client()
+    tcp_stream = connect(5000)
+
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
+    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+
+    # Create SSL stream.
+    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
+
+    #TODO expose connect
+    OpenSSL.connect(ssl_stream)
+
+    x509_server_cert = OpenSSL.get_peer_certificate(ssl_stream)
+
+    @test String(x509_server_cert.issuer_name) == "/C=US/ST=Isles of Redmond/CN=www.redmond.com"
+    @test String(x509_server_cert.subject_name) == "/C=US/ST=Isles of Redmond/CN=www.redmond.com"
+
+    request_str = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
+
+    written = unsafe_write(ssl_stream, pointer(request_str), length(request_str))
+
+    response = read(ssl_stream)
+    @show String(response)
+
+    close(ssl_stream)
+    finalize(ssl_ctx)
 end
