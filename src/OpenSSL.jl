@@ -1225,10 +1225,11 @@ mutable struct SSL
 end
 
 function free(ssl::SSL)
-    println("free ssl $(ssl)")
+    println("=> free ssl $(ssl)")
 
     #TODO
-    # ssl_disconnect(ssl)
+    res = ssl_disconnect(ssl)
+    println("|=> ssl_disconnect $(res)")
 
     ccall((:SSL_free, libssl), Cvoid, (SSL,), ssl)
 
