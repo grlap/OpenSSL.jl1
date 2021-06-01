@@ -423,8 +423,6 @@ mutable struct RSA
 end
 
 function free(rsa::RSA)
-    println("free rsa")
-
     ccall((:RSA_free, libcrypto), Cvoid, (RSA,), rsa)
 
     rsa.rsa = C_NULL
@@ -480,8 +478,6 @@ mutable struct EvpPKey
 end
 
 function free(evp_pkey::EvpPKey)
-    println("free evp")
-
     ccall((:EVP_PKEY_free, libcrypto), Cvoid, (EvpPKey,), evp_pkey)
 
     evp_pkey.evp_pkey = C_NULL
@@ -748,7 +744,6 @@ mutable struct BIO
 end
 
 function free(bio::BIO)
-    println("free bio")
     ccall((:BIO_free, libcrypto), Cvoid, (BIO,), bio)
 
     bio.bio = C_NULL
@@ -909,8 +904,6 @@ mutable struct X509Name
 end
 
 function free(x509_name::X509Name)
-    println("free x509")
-
     ccall((:X509_NAME_free, libcrypto), Cvoid, (X509Name,), x509_name)
 
     x509_name.x509_name = C_NULL
@@ -981,8 +974,6 @@ mutable struct X509Certificate
 end
 
 function free(x509_cert::X509Certificate)
-    println("free x509_cert")
-
     ccall((:X509_free, libcrypto), Cvoid, (X509Certificate,), x509_cert)
 
     x509_cert.x509 = C_NULL
@@ -1181,7 +1172,6 @@ mutable struct SSLContext
 end
 
 function free(ssl_context::SSLContext)
-    println("free ssl_context $(ssl_context)")
     ccall((:SSL_CTX_free, libssl), Cvoid, (SSLContext,), ssl_context)
 
     ssl_context.ssl_ctx = C_NULL
@@ -1242,12 +1232,6 @@ mutable struct SSL
 end
 
 function free(ssl::SSL)
-    println("=> free ssl $(ssl)")
-
-    #TODO
-    #res = ssl_disconnect(ssl)
-    #println("|=> ssl_disconnect $(res)")
-
     ccall((:SSL_free, libssl), Cvoid, (SSL,), ssl)
 
     ssl.ssl = C_NULL
