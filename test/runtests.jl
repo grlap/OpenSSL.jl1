@@ -138,6 +138,20 @@ end
     finalize(ssl_ctx)
 end
 
+@testset "NoCloseOnSSLStream" begin
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
+    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+
+    # Create SSL stream.
+    tcp_stream = connect("www.nghttp2.org", 443)
+    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
+
+    res = digest(EVPMD5(), ssl_stream)
+    # Do not close SSLStream, leave it to the finalizer.
+    #close(ssl_stream)
+    #finalize(ssl_ctx)
+end
+
 @testset "Hash" begin
     res = digest(EVPMD5(), IOBuffer("The quick brown fox jumps over the lazy dog"))
     @test res == UInt8[0x9e, 0x10, 0x7d, 0x9d, 0x37, 0x2b, 0xb6, 0x82, 0x6b, 0xd8, 0x1d, 0x35, 0x42, 0xa4, 0x19, 0xd6,]
@@ -151,10 +165,10 @@ end
     tcp_stream = connect("www.nghttp2.org", 443)
     ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
-    res = digest(EVPMD5(), ssl_stream)
-    @show res
-    #close(ssl_stream)
-    #finalize(ssl_ctx)
+    result = digest(EVPMD5(), ssl_stream)
+    @test result == UInt8[0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04, 0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e]
+    close(ssl_stream)
+    finalize(ssl_ctx)
 end
 
 @testset "SelfSignedCert" begin
@@ -205,7 +219,6 @@ function test_server()
 
     sign_certificate(x509_certificate, evp_pkey)
 
-
     server_socket = listen(5000)
     accepted_socket = accept(server_socket)
 
@@ -233,7 +246,7 @@ function test_server()
 
     close(ssl_stream)
     finalize(ssl_ctx)
-
+    return nothing
 end
 
 function test_client()
@@ -262,4 +275,5 @@ function test_client()
 
     close(ssl_stream)
     finalize(ssl_ctx)
+    return nothing
 end

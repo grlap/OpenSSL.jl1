@@ -14,10 +14,10 @@ using Sockets
     [x] Store the SSLContext (part of SSLStream)
 """
 
-export TLSv12ClientMethod, TLSv12ServerMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate, X509Store, EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB,
-       EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest, EVPMDNull, EVPMD2, EVPMD5,
-       EVPSHA1, rsa_generate_key, add_entry, sign_certificate, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read, unsafe_write, connect, get_peer_certificate,
-       free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
+export TLSv12ClientMethod, TLSv12ServerMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate, X509Store, EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB,
+       EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest, EVPMDNull,
+       EVPMD2, EVPMD5, EVPSHA1, rsa_generate_key, add_entry, sign_certificate, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read, unsafe_write, connect,
+       get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
 
 const Option{T} = Union{Nothing,T} where {T}
 
@@ -295,7 +295,8 @@ end
 function free(big_num_contex::BigNumContext)
     ccall((:BN_CTX_free, libcrypto), Cvoid, (BigNumContext,), big_num_contex)
 
-    return big_num_contex.bn_ctx = C_NULL
+    big_num_contex.bn_ctx = C_NULL
+    return nothing
 end
 
 """
@@ -333,7 +334,8 @@ end
 function free(big_num::BigNum)
     ccall((:BN_free, libcrypto), Cvoid, (BigNum,), big_num)
 
-    return big_num.bn = C_NULL
+    big_num.bn = C_NULL
+    return nothing
 end
 
 function Base.:+(a::BigNum, b::BigNum)::BigNum
@@ -425,7 +427,8 @@ function free(rsa::RSA)
 
     ccall((:RSA_free, libcrypto), Cvoid, (RSA,), rsa)
 
-    return rsa.rsa = C_NULL
+    rsa.rsa = C_NULL
+    return nothing
 end
 
 const EVP_PKEY_RSA = 6 #NID_rsaEncryption
@@ -481,7 +484,8 @@ function free(evp_pkey::EvpPKey)
 
     ccall((:EVP_PKEY_free, libcrypto), Cvoid, (EvpPKey,), evp_pkey)
 
-    return evp_pkey.evp_pkey = C_NULL
+    evp_pkey.evp_pkey = C_NULL
+    return nothing
 end
 
 """
@@ -545,7 +549,8 @@ end
 function free(evp_cipher_ctx::EVPCipherContext)
     ccall((:EVP_CIPHER_CTX_free, libcrypto), Cvoid, (EVPCipherContext,), evp_cipher_ctx)
 
-    return evp_cipher_ctx.evp_cipher_ctx = C_NULL
+    evp_cipher_ctx.evp_cipher_ctx = C_NULL
+    return nothing
 end
 
 """
@@ -585,7 +590,8 @@ end
 function free(evp_digest_ctx::EVPDigestContext)
     ccall((:EVP_MD_CTX_free, libcrypto), Cvoid, (EVPDigestContext,), evp_digest_ctx)
 
-    return evp_digest_ctx.evp_md_ctx = C_NULL
+    evp_digest_ctx.evp_md_ctx = C_NULL
+    return nothing
 end
 
 function digest_init(evp_digest_ctx::EVPDigestContext, evp_digest::EVPDigest)
@@ -690,7 +696,8 @@ end
 function free(bio_method::BIOMethod)
     ccall((:BIO_meth_free, libcrypto), Cvoid, (BIOMethod,), bio_method)
 
-    return bio_method.bio = C_NULL
+    bio_method.bio = C_NULL
+    return nothing
 end
 
 """
@@ -698,6 +705,8 @@ end
 """
 mutable struct BIO
     bio::Ptr{Cvoid}
+
+    BIO(bio::Ptr{Cvoid}) = new(bio)
 
     """
         Creates a BIO object using IO stream method.
@@ -739,9 +748,11 @@ mutable struct BIO
 end
 
 function free(bio::BIO)
+    println("free bio")
     ccall((:BIO_free, libcrypto), Cvoid, (BIO,), bio)
 
-    return bio.bio = C_NULL
+    bio.bio = C_NULL
+    return nothing
 end
 
 clear(bio::BIO) = bio.bio
@@ -805,6 +816,8 @@ mutable struct BIOStream <: IO
     io::Option{IO}
 
     BIOStream(io::IO) = new(BIO(), io)
+
+    BIOStream(bio::BIO, io::IO) = new(bio, io)
 end
 
 function bio_stream_set_data(bio_stream::BIOStream)
@@ -854,7 +867,8 @@ end
 function free(asn1_time::Asn1Time)
     ccall((:ASN1_STRING_free, libcrypto), Cvoid, (Asn1Time,), asn1_time)
 
-    return asn1_time.asn1_time = C_NULL
+    asn1_time.asn1_time = C_NULL
+    return nothing
 end
 
 function Dates.adjust(asn1_time::Asn1Time, seconds::Second)
@@ -899,7 +913,8 @@ function free(x509_name::X509Name)
 
     ccall((:X509_NAME_free, libcrypto), Cvoid, (X509Name,), x509_name)
 
-    return x509_name.x509_name = C_NULL
+    x509_name.x509_name = C_NULL
+    return nothing
 end
 
 """
@@ -970,7 +985,8 @@ function free(x509_cert::X509Certificate)
 
     ccall((:X509_free, libcrypto), Cvoid, (X509Certificate,), x509_cert)
 
-    return x509_cert.x509 = C_NULL
+    x509_cert.x509 = C_NULL
+    return nothing
 end
 
 function Base.write(io::IO, x509_cert::X509Certificate)
@@ -1109,7 +1125,8 @@ end
 function free(x509_store::X509Store)
     ccall((:X509_STORE_free, libcrypto), Cvoid, (X509Store,), x509_store)
 
-    return x509_store.x509_store = C_NULL
+    x509_store.x509_store = C_NULL
+    return nothing
 end
 
 function add_cert(x509_store::X509Store, x509_certificate::X509Certificate)
@@ -1117,7 +1134,6 @@ function add_cert(x509_store::X509Store, x509_certificate::X509Certificate)
         throw(OpenSSLException())
     end
 end
-
 
 """
     SSLMethod.
@@ -1168,7 +1184,8 @@ function free(ssl_context::SSLContext)
     println("free ssl_context $(ssl_context)")
     ccall((:SSL_CTX_free, libssl), Cvoid, (SSLContext,), ssl_context)
 
-    return ssl_context.ssl_ctx = C_NULL
+    ssl_context.ssl_ctx = C_NULL
+    return nothing
 end
 
 """
@@ -1228,12 +1245,13 @@ function free(ssl::SSL)
     println("=> free ssl $(ssl)")
 
     #TODO
-    res = ssl_disconnect(ssl)
-    println("|=> ssl_disconnect $(res)")
+    #res = ssl_disconnect(ssl)
+    #println("|=> ssl_disconnect $(res)")
 
     ccall((:SSL_free, libssl), Cvoid, (SSL,), ssl)
 
-    return ssl.ssl = C_NULL
+    ssl.ssl = C_NULL
+    return nothing
 end
 
 function ssl_connect(ssl::SSL)
@@ -1271,14 +1289,23 @@ struct SSLStream <: IO
     lock::ReentrantLock
 
     function SSLStream(ssl_context::SSLContext, read_stream::IO, write_stream::IO)
-        bio_read_stream = BIOStream(read_stream)
-        bio_write_stream = BIOStream(write_stream)
+        # Create a read and write BIOs.
+        bio_read::BIO = BIO()
+        bio_write::BIO = BIO()
 
-        ssl = SSL(ssl_context, bio_read_stream.bio, bio_write_stream.bio)
+        # Create a new BIOs instances (without the finalizer), as SSL will free them on close.
+        bio_read_ssl_context = BIO(bio_read.bio)
+        bio_write_ssl_context = BIO(bio_write.bio)
 
-        # On finalize call first clear function, to ensure BIO_free will not be called.
-        finalizer(clear, bio_read_stream.bio)
-        finalizer(clear, bio_write_stream.bio)
+        bio_read_stream = BIOStream(bio_read_ssl_context, read_stream)
+        bio_write_stream = BIOStream(bio_write_ssl_context, write_stream)
+
+        ssl = SSL(ssl_context, bio_read_ssl_context, bio_write_ssl_context)
+
+        # Ensure the finalization is no-op.
+        bio_read.bio = C_NULL
+        bio_write.bio = C_NULL
+        @show ssl
 
         return new(ssl, ssl_context, bio_read_stream, bio_write_stream, ReentrantLock())
     end
