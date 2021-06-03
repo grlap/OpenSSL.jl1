@@ -79,11 +79,25 @@ end
     certs_pem = split(file_content, start_line; keepempty=false)
     cert = certs_pem[2]
 
-    x509_cert = OpenSSL.X509Certificate(cert)
+    x509_cert = X509Certificate(cert)
     @test String(x509_cert.subject_name) == "/C=BE/O=GlobalSign nv-sa/OU=Root CA/CN=GlobalSign Root CA"
     @test String(x509_cert.issuer_name) == "/C=BE/O=GlobalSign nv-sa/OU=Root CA/CN=GlobalSign Root CA"
     @test String(x509_cert.time_not_before) == "Sep  1 12:00:00 1998 GMT"
     @test String(x509_cert.time_not_after) == "Jan 28 12:00:00 2028 GMT"
+
+    # finalizer will cleanup
+    #free(x509_cert)
+
+    # X509 store.
+    x509_store = X509Store()
+
+    foreach(2:length(certs_pem)) do i
+        x509_cert = X509Certificate(certs_pem[i])
+        add_cert(x509_store, x509_cert)
+        free(x509_cert)
+    end
+
+    free(x509_store)
 end
 
 @testset "HttpsConnect" begin
@@ -195,12 +209,6 @@ end
 
     @show x509_name, String(x509_name)
     @show x509_certificate
-
-    # X509 store.
-    x509_store = X509Store()
-    add_cert(x509_store, x509_certificate)
-    free(x509_store)
-    free(x509_certificate)
 end
 
 function test_server()
@@ -241,8 +249,10 @@ function test_server()
 
     eof(ssl_stream)
     av = bytesavailable(ssl_stream)
-    x = read(ssl_stream, av)
-    @show x
+    request = read(ssl_stream, av)
+    reply = "reply: $(String(request))"
+
+    write(ssl_stream, reply)
 
     close(ssl_stream)
     finalize(ssl_ctx)
@@ -277,3 +287,80 @@ function test_client()
     finalize(ssl_ctx)
     return nothing
 end
+
+
+@show OpenSSL.OpenSSLException()
+
+ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
+result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+@show result
+result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+@show result
+
+tls = OpenSSL.ssl_get_thread_state()
+t = @task begin
+    OpenSSL.ssl_set_thread_state(C_NULL)
+    println("$(objectid(current_task()))")
+
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
+    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+    @show result
+    result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_456_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+
+    sleep(1);
+    throw(OpenSSL.OpenSSLException())
+    println("done"); 
+end
+
+println("$(objectid(current_task()))")
+schedule(t);
+
+try
+    wait(t)
+catch ex
+    @show ex.task.exception
+end
+
+OpenSSL.ssl_set_thread_state(tls)
+println("First ex:")
+@show OpenSSL.OpenSSLException()
+
+"""
+    ERR_print_errors
+    ERR_print_errors_cb
+
+        CRYPTO_THREAD_ID tid = CRYPTO_THREAD_get_current_id();
+
+    ERR_get_error_all
+    get_error_values
+    ossl_err_get_state_int (ERR_get_state)
+
+    static CRYPTO_THREAD_LOCAL err_thread_local;
+
+    CRYPTO_THREAD_get_local
+    
+    cglobal((:err_thread_local, libcrypto))
+    cglobal((:set_err_thread_local, libcrypto))
+
+
+    CRYPTO_THREAD_init_local
+
+    rand = CRYPTO_THREAD_get_local(&dgbl->public);
+    CRYPTO_THREAD_set_local(&dgbl->public, NULL);
+
+    CRYPTO_THREAD_cleanup_local(&dgbl->private);
+    CRYPTO_THREAD_cleanup_local(&dgbl->public);
+    EVP_RAND_CTX_free(dgbl->primary);
+    EVP_RAND_CTX_free(dgbl->seed);
+
+
+    ERR_STATE *ossl_err_get_state_int(void)
+    {
+
+    void err_unshelve_state(void* state)
+    {
+        if (state != (void*)-1)
+            CRYPTO_THREAD_set_local(&err_thread_local, (ERR_STATE*)state);
+    }
+
+"""

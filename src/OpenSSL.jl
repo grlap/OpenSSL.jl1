@@ -1577,6 +1577,23 @@ function get_error()::String
     return String(read(bio_stream.io))
 end
 
+function ssl_thread_init()
+    crypto_thread_local = Ref{Csize_t}(0)
+
+    GC.@preserve crypto_thread_local begin
+        ccall((:CRYPTO_THREAD_init_local, libcrypto), Cint, (Ptr{Csize_t}, Ptr{Cvoid}), pointer_from_objref(crypto_thread_local), C_NULL)
+    end
+    @show crypto_thread_local
+end
+
+function ssl_get_thread_state()::Ptr{Cvoid}
+    return ccall((:ERR_get_state, libcrypto), Ptr{Cvoid}, ())
+end
+
+function ssl_set_thread_state(state::Ptr{Cvoid})
+    return ccall((:err_unshelve_state, libcrypto), Cvoid, (Ptr{Cvoid},), state)
+end
+
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()
 const BIO_STREAM_CALLBACKS = Ref{BIOStreamCallbacks}()
 const BIO_STREAM_METHOD = Ref{BIOMethod}()
