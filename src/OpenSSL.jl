@@ -137,6 +137,65 @@ const UPDATE_HTTP2_ALPN = "\x02h2\x08http/1.1"
       # BIO_get_indent() gets the current indentation.
       BIO_CTRL_GET_INDENT = 81)
 
+"""
+    Classes of BIOs.
+"""
+# Socket, fd, connect or accept.
+const BIO_TYPE_DESCRIPTOR = 0x0100
+const BIO_TYPE_FILTER = 0x0200
+const BIO_TYPE_SOURCE_SINK = 0x0400
+
+"""
+    BIO types.
+"""
+@enum(BIOType::Cint,
+      #
+      BIO_TYPE_NONE = 0,
+      #
+      BIO_TYPE_MEM = 1 | BIO_TYPE_SOURCE_SINK,
+      #
+      BIO_TYPE_FILE = 2 | BIO_TYPE_SOURCE_SINK,
+      #
+      BIO_TYPE_FD = 4 | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR,
+      #
+      BIO_TYPE_SOCKET = (5 | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR),
+      #
+      BIO_TYPE_NULL = (6 | BIO_TYPE_SOURCE_SINK),
+      #
+      BIO_TYPE_SSL = (7 | BIO_TYPE_FILTER),
+      # Message digest BIO filter.
+      BIO_TYPE_MD = (8 | BIO_TYPE_FILTER),
+      #
+      BIO_TYPE_BUFFER = (9 | BIO_TYPE_FILTER),
+      #
+      BIO_TYPE_CIPHER = (10 | BIO_TYPE_FILTER),
+      #
+      BIO_TYPE_BASE64 = (11 | BIO_TYPE_FILTER),
+      #
+      BIO_TYPE_CONNECT = (12 | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR),
+      #
+      BIO_TYPE_ACCEPT = (13 | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR),
+      # server proxy BIO
+      BIO_TYPE_NBIO_TEST = 16 | BIO_TYPE_FILTER,
+      #
+      BIO_TYPE_NULL_FILTER = 17 | BIO_TYPE_FILTER,
+      # Half a BIO pair.
+      BIO_TYPE_BIO = 19 | BIO_TYPE_SOURCE_SINK,
+      #
+      BIO_TYPE_LINEBUFFER = 20 | BIO_TYPE_FILTER,
+      #
+      BIO_TYPE_DGRAM = 21 | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR,
+      #
+      BIO_TYPE_ASN1 = 22 | BIO_TYPE_FILTER,
+      #
+      BIO_TYPE_COMP = 23 | BIO_TYPE_FILTER,
+      #
+      BIO_TYPE_DGRAM_SCTP = 24 | BIO_TYPE_SOURCE_SINK | BIO_TYPE_DESCRIPTOR,
+      #
+      BIO_TYPE_CORE_TO_PROV = 25 | BIO_TYPE_SOURCE_SINK,
+      #
+      BIO_TYPE_START = 128)
+
 # Some values are reserved until OpenSSL 3.0.0 because they were previously
 # included in SSL_OP_ALL in a 1.1.x release.
 @bitflag SSLOptions::UInt64 begin
@@ -753,13 +812,48 @@ end
 clear(bio::BIO) = bio.bio
 
 """
+    Returns the BIO type.
+"""
+function bio_type(bio::BIO)::BIOType
+    bio_type = ccall((:BIO_method_type, libcrypto), Cint, (BIO,), bio)
+
+    return BIOType(bio_type)
+end
+
+"""
+    Returns internal BIO memory.
+"""
+function bio_get_mem_data(bio::BIO)
+    if bio_type(bio) != BIO_TYPE_MEM
+        throw(Exception("Expecting BIO_TYPE_MEM bio."))
+    end
+
+    mem_ptr = Ref{Ptr{UInt8}}(0)
+
+    mem_data = GC.@preserve mem_ptr begin
+        result = ccall((:BIO_ctrl, libcrypto), Clong, (BIO, Cint, Clong, Ptr{Ptr{Cvoid}}), bio, 3, 1, pointer_from_objref(mem_ptr))
+        if mem_ptr.x != C_NULL
+            return unsafe_wrap(Vector{UInt8}, mem_ptr.x, result; own=false)
+        else
+            return Vector{UInt8}()
+        end
+    end
+
+    return mem_data
+end
+
+"""
     BIO write.
 """
+## throw error here
 function Base.unsafe_write(bio::BIO, out_buffer::Ptr{UInt8}, out_length::Int)
     result = ccall((:BIO_write, libcrypto), Cint, (BIO, Ptr{Cvoid}, Cint), bio, out_buffer, out_length)
-
-    return result
+    if result < 0
+        throw(OpenSSLException())
+    end
 end
+
+Base.write(bio::BIO, out_data) = return unsafe_write(bio, pointer(out_data), length(out_data))
 
 """
     BIO Stream callbacks.
@@ -781,6 +875,8 @@ on_bio_stream_destroy(bio::BIO)::Cint = Cint(0)
 
 function on_bio_stream_read(bio::BIO, out::Ptr{Cchar}, outlen::Cint)::Cint
     bio_stream = bio_stream_from_data(bio)
+    update_tls_error_state()
+
     eof(bio_stream.io)
     available_bytes = bytesavailable(bio_stream.io)
 
@@ -793,6 +889,7 @@ end
 
 function on_bio_stream_write(bio::BIO, in::Ptr{Cchar}, inlen::Cint)::Cint
     bio_stream = bio_stream_from_data(bio)
+    update_tls_error_state()
 
     written = unsafe_write(bio_stream.io, in, inlen)
 
@@ -958,7 +1055,7 @@ mutable struct X509Certificate
     """
     function X509Certificate(in_string::AbstractString)::X509Certificate
         # Create a BIO and write the PEM string.
-        bio = BIO(OpenSSL.BIOMethod_mem())
+        bio = BIO(BIOMethod_mem())
         unsafe_write(bio, pointer(in_string), length(in_string))
 
         x509 = ccall((:PEM_read_bio_X509, libcrypto), Ptr{Cvoid}, (BIO, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), bio, C_NULL, C_NULL, C_NULL)
@@ -967,8 +1064,9 @@ mutable struct X509Certificate
         end
 
         x509_cert = new(x509)
-
         finalizer(free, x509_cert)
+
+        free(bio)
         return x509_cert
     end
 end
@@ -986,20 +1084,26 @@ function Base.write(io::IO, x509_cert::X509Certificate)
     GC.@preserve bio_stream begin
         bio_stream_set_data(bio_stream)
 
-        result = ccall((:PEM_write_bio_X509, libcrypto), Cint, (BIO, X509Certificate), bio_stream.bio, x509_cert)
-
-        @show result
+        if ccall((:PEM_write_bio_X509, libcrypto), Cint, (BIO, X509Certificate), bio_stream.bio, x509_cert) != 1
+            throw(OpenSSLException())
+        end
     end
 end
 
 function sign_certificate(x509_cert::X509Certificate, evp_pkey::EvpPKey)
     evp_md = ccall((:EVP_sha256, libcrypto), Ptr{Cvoid}, ())
 
-    result = ccall((:X509_set_pubkey, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey)
+    if ccall((:X509_set_pubkey, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey) != 1
+        throw(OpenSSLException())
+    end
 
-    result = ccall((:X509_sign, libcrypto), Cint, (X509Certificate, EvpPKey, Ptr{Cvoid}), x509_cert, evp_pkey, evp_md)
+    if ccall((:X509_sign, libcrypto), Cint, (X509Certificate, EvpPKey, Ptr{Cvoid}), x509_cert, evp_pkey, evp_md) == 0
+        throw(OpenSSLException())
+    end
 
-    return result = ccall((:X509_verify, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey)
+    if ccall((:X509_verify, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey) != 1
+        throw(OpenSSLException())
+    end
 end
 
 function get_subject_name(x509_cert::X509Certificate)::X509Name
@@ -1188,8 +1292,10 @@ end
 """
     Configures TLS ALPN (Application-Layer Protocol Negotiation).
 """
-function ssl_set_alpn(ssl_context::SSLContext, protocol_list::String)::Cint
-    return ccall((:SSL_CTX_set_alpn_protos, libssl), Cint, (SSLContext, Ptr{UInt8}, UInt32), ssl_context, pointer(protocol_list), length(protocol_list))
+function ssl_set_alpn(ssl_context::SSLContext, protocol_list::String)
+    if ccall((:SSL_CTX_set_alpn_protos, libssl), Cint, (SSLContext, Ptr{UInt8}, UInt32), ssl_context, pointer(protocol_list), length(protocol_list)) != 0
+        throw(OpenSSLException())
+    end
 end
 
 # TODO
@@ -1199,15 +1305,21 @@ end
     Configures available TLSv1.3 ciphersuites.
 """
 function ssl_set_ciphersuites(ssl_context::SSLContext, cipher_suites::String)
-    return ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (SSLContext, Cstring), ssl_context, cipher_suites)
+    if ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (SSLContext, Cstring), ssl_context, cipher_suites) != 1
+        throw(OpenSSLException())
+    end
 end
 
 function ssl_use_certificate(ssl_context::SSLContext, x509_cert::X509Certificate)
-    return ccall((:SSL_CTX_use_certificate, libssl), Cint, (SSLContext, X509Certificate), ssl_context, x509_cert)
+    if ccall((:SSL_CTX_use_certificate, libssl), Cint, (SSLContext, X509Certificate), ssl_context, x509_cert) != 1
+        throw(OpenSSLException())
+    end
 end
 
 function ssl_use_private_key(ssl_context::SSLContext, evp_pkey::EvpPKey)
-    return ccall((:SSL_CTX_use_PrivateKey, libssl), Cint, (SSLContext, EvpPKey), ssl_context, evp_pkey)
+    if ccall((:SSL_CTX_use_PrivateKey, libssl), Cint, (SSLContext, EvpPKey), ssl_context, evp_pkey) != 1
+        throw(OpenSSLException())
+    end
 end
 
 """
@@ -1239,23 +1351,26 @@ function free(ssl::SSL)
 end
 
 function ssl_connect(ssl::SSL)
-    result = ccall((:SSL_connect, libssl), Cint, (SSL,), ssl)
+    if ccall((:SSL_connect, libssl), Cint, (SSL,), ssl) != 1
+        throw(OpenSSLException())
+    end
 
     ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
-
-    return result
+    return nothing
 end
 
-function ssl_accept(ssl::SSL)::Cint
-    result = ccall((:SSL_accept, libssl), Cint, (SSL,), ssl)
+function ssl_accept(ssl::SSL)
+    if ccall((:SSL_accept, libssl), Cint, (SSL,), ssl) != 1
+        throw(OpenSSLException())
+    end
 
     ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
-
-    return result
+    return nothing
 end
 
 function ssl_disconnect(ssl::SSL)
-    return ccall((:SSL_shutdown, libssl), Cint, (SSL,), ssl)
+    ccall((:SSL_shutdown, libssl), Cint, (SSL,), ssl)
+    return nothing
 end
 
 function get_error(ssl::SSL, ret::Cint)::Cint
@@ -1331,8 +1446,6 @@ function Base.unsafe_write(ssl_stream::SSLStream, in_buffer::Ptr{UInt8}, in_leng
 end
 
 function Sockets.connect(ssl_stream::SSLStream)
-    write_count::Int = 0
-
     bio_read_stream = ssl_stream.bio_read_stream
     bio_write_stream = ssl_stream.bio_write_stream
 
@@ -1340,15 +1453,11 @@ function Sockets.connect(ssl_stream::SSLStream)
         bio_stream_set_data(bio_read_stream)
         bio_stream_set_data(bio_write_stream)
 
-        if ssl_connect(ssl_stream.ssl) != 1
-            throw(OpenSSLException())
-        end
+        ssl_connect(ssl_stream.ssl)
     end
 end
 
 function Sockets.accept(ssl_stream::SSLStream)
-    write_count::Int = 0
-
     bio_read_stream = ssl_stream.bio_read_stream
     bio_write_stream = ssl_stream.bio_write_stream
 
@@ -1356,9 +1465,7 @@ function Sockets.accept(ssl_stream::SSLStream)
         bio_stream_set_data(bio_read_stream)
         bio_stream_set_data(bio_write_stream)
 
-        if ssl_accept(ssl_stream.ssl) != 1
-            throw(OpenSSLException())
-        end
+        ssl_accept(ssl_stream.ssl)
     end
 end
 
@@ -1512,22 +1619,19 @@ struct BIOStreamCallbacks
 end
 
 function Base.String(big_num::BigNum)
-    iob = IOBuffer()
-    bio_stream = BIOStream(iob)
+    bio = BIO(BIOMethod_mem())
 
-    write(iob, "0x")
+    write(bio, "0x")
 
-    GC.@preserve bio_stream begin
-        bio_stream_set_data(bio_stream)
-
-        if ccall((:BN_print, libcrypto), Cint, (BIO, BigNum), bio_stream.bio, big_num) == 0
-            throw(OpenSSLException())
-        end
+    if ccall((:BN_print, libcrypto), Cint, (BIO, BigNum), bio, big_num) == 0
+        throw(OpenSSLException())
     end
 
-    seek(iob, 0)
+    result = String(bio_get_mem_data(bio))
 
-    return String(read(iob))
+    free(bio)
+
+    return result
 end
 
 function Base.String(asn1_time::Asn1Time)
@@ -1535,18 +1639,17 @@ function Base.String(asn1_time::Asn1Time)
         return "C_NULL"
     end
 
-    bio_stream = BIOStream(IOBuffer())
+    bio = BIO(BIOMethod_mem())
 
-    GC.@preserve bio_stream begin
-        bio_stream_set_data(bio_stream)
-
-        if ccall((:ASN1_TIME_print, libcrypto), Cint, (BIO, Asn1Time), bio_stream.bio, asn1_time) == 0
-            throw(OpenSSLException())
-        end
+    if ccall((:ASN1_TIME_print, libcrypto), Cint, (BIO, Asn1Time), bio, asn1_time) == 0
+        throw(OpenSSLException())
     end
 
-    seek(bio_stream.io, 0)
-    return String(read(bio_stream.io))
+    result = String(bio_get_mem_data(bio))
+
+    free(bio)
+
+    return result
 end
 
 Base.show(io::IO, big_num::BigNum) = write(io, String(big_num))
@@ -1556,42 +1659,50 @@ Base.show(io::IO, asn1_time::Asn1Time) = write(io, String(asn1_time))
 Base.show(io::IO, x509_name::X509Name) = write(io, String(x509_name))
 
 function Base.show(io::IO, x509_cert::X509Certificate)
-    return println(io, """X509Certificate:
-                       subject_name: $(x509_cert.subject_name)
-                       issuer_name: $(x509_cert.issuer_name)""")
+    return println(io, """X509Certificate: subject_name: $(x509_cert.subject_name) issuer_name: $(x509_cert.issuer_name)""")
 end
 
 """
     Error handling.
 """
 function get_error()::String
-    bio_stream = BIOStream(IOBuffer())
+    # Create memory BIO
+    bio = BIO(BIOMethod_mem())
 
-    GC.@preserve bio_stream begin
-        bio_stream_set_data(bio_stream)
+    # Check existing error messages stored in task TLS.
+    if haskey(task_local_storage(), :openssl_err)
+        # Copy existing error from task tls.
+        existing_error_msg = task_local_storage(:openssl_err)
+        delete!(task_local_storage(), :openssl_err)
 
-        ccall((:ERR_print_errors, libcrypto), Cvoid, (BIO,), bio_stream.bio)
+        # Write to the bio
+        write(bio, existing_error_msg)
     end
 
-    seek(bio_stream.io, 0)
-    return String(read(bio_stream.io))
+    # Clear the error queue, print the error messages to the memory BIO.
+    ccall((:ERR_print_errors, libcrypto), Cvoid, (BIO,), bio)
+
+    # Read the formatted error messages from the memory BIO.
+    error_msg = String(bio_get_mem_data(bio))
+
+    # Free bio.
+    free(bio)
+
+    return error_msg
 end
 
-function ssl_thread_init()
-    crypto_thread_local = Ref{Csize_t}(0)
-
-    GC.@preserve crypto_thread_local begin
-        ccall((:CRYPTO_THREAD_init_local, libcrypto), Cint, (Ptr{Csize_t}, Ptr{Cvoid}), pointer_from_objref(crypto_thread_local), C_NULL)
+"""
+    Clear the OpenSSL error queue.
+    Copy error messages from the thread TLS and store the formatted string into the task TLS.
+"""
+function update_tls_error_state()
+    # Check if there are errors in OpenSSL error queue.
+    result = ccall((:ERR_peek_error, libcrypto), Culong, ())
+    if result != 0
+        # Clear OpenSSL queue and store the errors in the Task TLS.
+        error_str = get_error()
+        task_local_storage(:openssl_err, error_str)
     end
-    @show crypto_thread_local
-end
-
-function ssl_get_thread_state()::Ptr{Cvoid}
-    return ccall((:ERR_get_state, libcrypto), Ptr{Cvoid}, ())
-end
-
-function ssl_set_thread_state(state::Ptr{Cvoid})
-    return ccall((:err_unshelve_state, libcrypto), Cvoid, (Ptr{Cvoid},), state)
 end
 
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()

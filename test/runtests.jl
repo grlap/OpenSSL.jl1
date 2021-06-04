@@ -94,7 +94,7 @@ end
     foreach(2:length(certs_pem)) do i
         x509_cert = X509Certificate(certs_pem[i])
         add_cert(x509_store, x509_cert)
-        free(x509_cert)
+        return free(x509_cert)
     end
 
     free(x509_store)
@@ -122,7 +122,6 @@ end
     written = unsafe_write(ssl_stream, pointer(request_str), length(request_str))
 
     response = read(ssl_stream)
-    @show String(response)
 
     close(ssl_stream)
     finalize(ssl_ctx)
@@ -159,8 +158,13 @@ end
     # Create SSL stream.
     tcp_stream = connect("www.nghttp2.org", 443)
     ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
+    OpenSSL.connect(ssl_stream)
 
-    res = digest(EVPMD5(), ssl_stream)
+    request_str = "GET / HTTP/1.1\r\nHost: www.nghttp2.org\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n"
+    unsafe_write(ssl_stream, pointer(request_str), length(request_str))
+
+    response = read(ssl_stream)
+
     # Do not close SSLStream, leave it to the finalizer.
     #close(ssl_stream)
     #finalize(ssl_ctx)
@@ -169,20 +173,6 @@ end
 @testset "Hash" begin
     res = digest(EVPMD5(), IOBuffer("The quick brown fox jumps over the lazy dog"))
     @test res == UInt8[0x9e, 0x10, 0x7d, 0x9d, 0x37, 0x2b, 0xb6, 0x82, 0x6b, 0xd8, 0x1d, 0x35, 0x42, 0xa4, 0x19, 0xd6,]
-end
-
-@testset "HashOnIOStream" begin
-    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
-    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
-
-    # Create SSL stream.
-    tcp_stream = connect("www.nghttp2.org", 443)
-    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
-
-    result = digest(EVPMD5(), ssl_stream)
-    @test result == UInt8[0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04, 0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e]
-    close(ssl_stream)
-    finalize(ssl_ctx)
 end
 
 @testset "SelfSignedCert" begin
@@ -288,79 +278,44 @@ function test_client()
     return nothing
 end
 
-
 @show OpenSSL.OpenSSLException()
 
 ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
 result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
-@show result
+println("======>")
 result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-@show result
+result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+OpenSSL.update_tls_error_state()
+result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+println("Abc:")
+println("$(OpenSSL.OpenSSLException().msg)")
+println("Def:")
+println("$(OpenSSL.OpenSSLException().msg)")
 
-tls = OpenSSL.ssl_get_thread_state()
 t = @task begin
-    OpenSSL.ssl_set_thread_state(C_NULL)
     println("$(objectid(current_task()))")
 
     ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
+    @show ssl_ctx
     result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
     @show result
-    result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_456_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+    result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
+    @show result
 
-    sleep(1);
+    sleep(1)
     throw(OpenSSL.OpenSSLException())
-    println("done"); 
+    println("done")
 end
 
-println("$(objectid(current_task()))")
-schedule(t);
+#println("$(objectid(current_task()))")
+#schedule(t);
 
 try
-    wait(t)
+    #    wait(t)
 catch ex
-    @show ex.task.exception
+    #    @show ex.task.exception
 end
 
-OpenSSL.ssl_set_thread_state(tls)
 println("First ex:")
 @show OpenSSL.OpenSSLException()
-
-"""
-    ERR_print_errors
-    ERR_print_errors_cb
-
-        CRYPTO_THREAD_ID tid = CRYPTO_THREAD_get_current_id();
-
-    ERR_get_error_all
-    get_error_values
-    ossl_err_get_state_int (ERR_get_state)
-
-    static CRYPTO_THREAD_LOCAL err_thread_local;
-
-    CRYPTO_THREAD_get_local
-    
-    cglobal((:err_thread_local, libcrypto))
-    cglobal((:set_err_thread_local, libcrypto))
-
-
-    CRYPTO_THREAD_init_local
-
-    rand = CRYPTO_THREAD_get_local(&dgbl->public);
-    CRYPTO_THREAD_set_local(&dgbl->public, NULL);
-
-    CRYPTO_THREAD_cleanup_local(&dgbl->private);
-    CRYPTO_THREAD_cleanup_local(&dgbl->public);
-    EVP_RAND_CTX_free(dgbl->primary);
-    EVP_RAND_CTX_free(dgbl->seed);
-
-
-    ERR_STATE *ossl_err_get_state_int(void)
-    {
-
-    void err_unshelve_state(void* state)
-    {
-        if (state != (void*)-1)
-            CRYPTO_THREAD_set_local(&err_thread_local, (ERR_STATE*)state);
-    }
-
-"""
