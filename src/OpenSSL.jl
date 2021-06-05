@@ -1698,15 +1698,26 @@ function Base.String(asn1_time::Asn1Time)
     return result
 end
 
+function Base.String(x509_cert::X509Certificate)
+    io = IOBuffer()
+
+    println(io, """
+        subject_name: $(x509_cert.subject_name)
+        issuer_name: $(x509_cert.issuer_name)
+        time_not_before: $(x509_cert.time_not_before)
+        time_not_after: $(x509_cert.time_not_after)""")
+
+    seek(io, 0)
+    return String(read(io))
+end
+
 Base.show(io::IO, big_num::BigNum) = write(io, String(big_num))
 
 Base.show(io::IO, asn1_time::Asn1Time) = write(io, String(asn1_time))
 
 Base.show(io::IO, x509_name::X509Name) = write(io, String(x509_name))
 
-function Base.show(io::IO, x509_cert::X509Certificate)
-    return println(io, """X509Certificate: subject_name: $(x509_cert.subject_name) issuer_name: $(x509_cert.issuer_name)""")
-end
+Base.show(io::IO, x509_cert::X509Certificate) = write(io, String(x509_cert))
 
 """
     Error handling.

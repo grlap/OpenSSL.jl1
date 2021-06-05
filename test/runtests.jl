@@ -215,14 +215,10 @@ end
 
     x509_certificate2 = X509Certificate(cert_pem)
 
-    #iob = IOBuffer()
-    #iob2 = IOBuffer()
+    x509_string = String(x509_certificate)
+    x509_string2 = String(x509_certificate2)
 
-    #write(iob, x509_certificate)
-    #write(iob2, x509_certificate2)
-
-    @show x509_certificate
-    @show x509_certificate2
+    @test x509_string == x509_string2
 end
 
 @testset "VerifyErrorTaskTLS" begin
