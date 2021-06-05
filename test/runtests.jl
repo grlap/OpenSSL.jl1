@@ -190,7 +190,7 @@ end
     @test res == UInt8[0x9e, 0x10, 0x7d, 0x9d, 0x37, 0x2b, 0xb6, 0x82, 0x6b, 0xd8, 0x1d, 0x35, 0x42, 0xa4, 0x19, 0xd6,]
 end
 
-@testset "SelfSignedCert" begin
+@testset "SelfSigned" begin
     evp_pkey = EvpPKey(rsa_generate_key())
     x509_certificate = X509Certificate()
     x509_name = X509Name()
