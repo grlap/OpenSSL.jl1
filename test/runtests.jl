@@ -165,6 +165,7 @@ end
     unsafe_write(ssl_stream, pointer(request_str), length(request_str))
 
     response = read(ssl_stream)
+    @test contains(String(response), "HTTP/1.1 200 OK")
 
     # Do not close SSLStream, leave it to the finalizer.
     #close(ssl_stream)
@@ -180,7 +181,7 @@ end
     ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
     err = @catch_exception_object read(ssl_stream)
-    @test typeof(err) == OpenSSL.OpenSSLException
+    @test typeof(err) == OpenSSL.OpenSSLError
 
     close(ssl_stream)
     free(ssl_ctx)

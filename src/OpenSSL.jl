@@ -329,12 +329,12 @@ const EVP_MAX_BLOCK_LENGTH = 32
 # define RSA_F4  0x10001L
 
 """
-    OpenSSL exception.
+    OpenSSL error.
 """
-struct OpenSSLException <: Exception
+struct OpenSSLError <: Exception
     msg::AbstractString
 
-    OpenSSLException() = new(get_error())
+    OpenSSLError() = new(get_error())
 end
 
 """
@@ -346,7 +346,7 @@ mutable struct BigNumContext
     function BigNumContext()
         big_num_contex = ccall((:BN_CTX_secure_new, libcrypto), Ptr{Cvoid}, ())
         if big_num_contex == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         big_num_contex = new(big_num_contex)
@@ -372,7 +372,7 @@ mutable struct BigNum
     function BigNum()
         big_num = ccall((:BN_new, libcrypto), Ptr{Cvoid}, ())
         if big_num == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         big_num = new(big_num)
@@ -388,7 +388,7 @@ mutable struct BigNum
     function BigNum(value::UInt64)
         big_num = BigNum()
         if ccall((:BN_set_word, libcrypto), Cint, (BigNum, UInt64), big_num, value) == 0
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         return big_num
@@ -406,7 +406,7 @@ function Base.:+(a::BigNum, b::BigNum)::BigNum
     r = BigNum()
 
     if ccall((:BN_add, libcrypto), Cint, (BigNum, BigNum, BigNum), r, a, b) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     return r
@@ -416,7 +416,7 @@ function Base.:-(a::BigNum, b::BigNum)::BigNum
     r = BigNum()
 
     if ccall((:BN_sub, libcrypto), Cint, (BigNum, BigNum, BigNum), r, a, b) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     return r
@@ -428,7 +428,7 @@ function Base.:*(a::BigNum, b::BigNum)::BigNum
     c = BigNumContext()
 
     if ccall((:BN_mul, libcrypto), Cint, (BigNum, BigNum, BigNum, BigNumContext), r, a, b, c) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     finalize(c)
@@ -443,7 +443,7 @@ function Base.:/(a::BigNum, b::BigNum)::BigNum
     c = BigNumContext()
 
     if ccall((:BN_div, libcrypto), Cint, (BigNum, BigNum, BigNum, BigNum, BigNumContext), dv, rm, a, b, c) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     finalize(rm)
@@ -459,7 +459,7 @@ function Base.:%(a::BigNum, b::BigNum)::BigNum
     c = BigNumContext()
 
     if ccall((:BN_div, libcrypto), Cint, (BigNum, BigNum, BigNum, BigNum, BigNumContext), dv, rm, a, b, c) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     finalize(dv)
@@ -479,7 +479,7 @@ mutable struct RSA
     function RSA()
         rsa = ccall((:RSA_new, libcrypto), Ptr{Cvoid}, ())
         if rsa == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         rsa = new(rsa)
@@ -508,7 +508,7 @@ function rsa_generate_key(; bits::Int32=Int32(2048))::RSA
     big_num = BigNum(UInt64(RSA_F4))
 
     if ccall((:RSA_generate_key_ex, libcrypto), Cint, (RSA, Cint, BigNum, Ptr{Cvoid}), rsa, bits, big_num, C_NULL) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     return rsa
@@ -523,7 +523,7 @@ mutable struct EvpPKey
     function EvpPKey()::EvpPKey
         evp_pkey = ccall((:EVP_PKEY_new, libcrypto), Ptr{Cvoid}, ())
         if evp_pkey == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         evp_pkey = new(evp_pkey)
@@ -536,7 +536,7 @@ mutable struct EvpPKey
         evp_pkey = EvpPKey()
 
         if ccall((:EVP_PKEY_assign, libcrypto), Cint, (EvpPKey, Cint, RSA), evp_pkey, EVP_PKEY_RSA, rsa) == 0
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         rsa.rsa = C_NULL
@@ -599,7 +599,7 @@ mutable struct EVPCipherContext
     function EVPCipherContext()
         evp_cipher_ctx = ccall((:EVP_CIPHER_CTX_new, libcrypto), Ptr{Cvoid}, ())
         if evp_cipher_ctx == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         evp_cipher_ctx = new(evp_cipher_ctx)
@@ -640,7 +640,7 @@ mutable struct EVPDigestContext
     function EVPDigestContext()
         evp_digest_ctx = ccall((:EVP_MD_CTX_new, libcrypto), Ptr{Cvoid}, ())
         if evp_digest_ctx == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         evp_digest_ctx = new(evp_digest_ctx)
@@ -659,14 +659,14 @@ end
 
 function digest_init(evp_digest_ctx::EVPDigestContext, evp_digest::EVPDigest)
     if ccall((:EVP_DigestInit_ex, libcrypto), Cint, (EVPDigestContext, EVPDigest, Ptr{Cvoid}), evp_digest_ctx, evp_digest, C_NULL) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
 function digest_update(evp_digest_ctx::EVPDigestContext, in_data::Vector{UInt8})
     GC.@preserve in_data begin
         if ccall((:EVP_DigestUpdate, libcrypto), Cint, (EVPDigestContext, Ptr{UInt8}, Csize_t), evp_digest_ctx, pointer(in_data), length(in_data)) == 0
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
     end
 end
@@ -677,7 +677,7 @@ function digest_final(evp_digest_ctx::EVPDigestContext)::Vector{UInt8}
 
     GC.@preserve out_data out_length begin
         if ccall((:EVP_DigestFinal_ex, libcrypto), Cint, (EVPDigestContext, Ptr{UInt8}, Ptr{UInt32}), evp_digest_ctx, pointer(out_data), pointer_from_objref(out_length)) == 0
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
     end
 
@@ -718,39 +718,39 @@ mutable struct BIOMethod
     function BIOMethod(bio_type::String)
         bio_method_index = ccall((:BIO_get_new_index, libcrypto), Cint, ())
         if bio_method_index == -1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         bio_method = ccall((:BIO_meth_new, libcrypto), Ptr{Cvoid}, (Cint, Cstring), bio_method_index, bio_type)
         if bio_method == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         bio_method = new(bio_method)
         finalizer(free, bio_method)
 
         if ccall((:BIO_meth_set_create, libcrypto), Cint, (BIOMethod, Ptr{Cvoid}), bio_method, BIO_STREAM_CALLBACKS.x.on_bio_create_ptr) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         if ccall((:BIO_meth_set_destroy, libcrypto), Cint, (BIOMethod, Ptr{Cvoid}), bio_method, BIO_STREAM_CALLBACKS.x.on_bio_destroy_ptr) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         if ccall((:BIO_meth_set_read, libcrypto), Cint, (BIOMethod, Ptr{Cvoid}), bio_method, BIO_STREAM_CALLBACKS.x.on_bio_read_ptr) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         if ccall((:BIO_meth_set_write, libcrypto), Cint, (BIOMethod, Ptr{Cvoid}), bio_method, BIO_STREAM_CALLBACKS.x.on_bio_write_ptr) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         if ccall((:BIO_meth_set_puts, libcrypto), Cint, (BIOMethod, Ptr{Cvoid}), bio_method, BIO_STREAM_CALLBACKS.x.on_bio_puts_ptr) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         if ccall((:BIO_meth_set_ctrl, libcrypto), Cint, (BIOMethod, Ptr{Cvoid}), bio_method, BIO_STREAM_CALLBACKS.x.on_bio_ctrl_ptr) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         return bio_method
@@ -797,7 +797,7 @@ mutable struct BIO
     function BIO()
         bio = ccall((:BIO_new, libcrypto), Ptr{Cvoid}, (BIOMethod,), BIO_STREAM_METHOD.x)
         if bio == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         bio = new(bio)
@@ -819,7 +819,7 @@ mutable struct BIO
     function BIO(bio_method::BIOMethod)
         bio = ccall((:BIO_new, libcrypto), Ptr{Cvoid}, (BIOMethod,), bio_method)
         if bio == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         bio = new(bio)
@@ -852,7 +852,7 @@ end
 """
 function bio_get_mem_data(bio::BIO)
     if bio_type(bio) != BIO_TYPE_MEM
-        throw(Exception("Expecting BIO_TYPE_MEM bio."))
+        throw(ArgumentError("Expecting BIO_TYPE_MEM bio."))
     end
 
     # Get BIOs memory data.
@@ -877,7 +877,7 @@ end
 function Base.unsafe_write(bio::BIO, out_buffer::Ptr{UInt8}, out_length::Int)
     result = ccall((:BIO_write, libcrypto), Cint, (BIO, Ptr{Cvoid}, Cint), bio, out_buffer, out_length)
     if result < 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -973,7 +973,7 @@ mutable struct Asn1Time
     function Asn1Time(unix_time::Int64)
         asn1_time = ccall((:ASN1_TIME_set, libcrypto), Ptr{Cvoid}, (Ptr{Cvoid}, Int64), C_NULL, unix_time)
         if asn1_time == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         asn1_time = new(asn1_time)
@@ -993,7 +993,7 @@ end
 function Dates.adjust(asn1_time::Asn1Time, seconds::Second)
     adj_asn1_time = ccall((:X509_gmtime_adj, libcrypto), Ptr{Cvoid}, (Asn1Time, Int64), asn1_time, seconds.value)
     if adj_asn1_time == C_NULL
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     if (adj_asn1_time != asn1_time.asn1_time)
@@ -1017,7 +1017,7 @@ mutable struct X509Name
     function X509Name()
         x509_name = ccall((:X509_NAME_new, libcrypto), Ptr{Cvoid}, ())
         if x509_name == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         x509_name = new(x509_name)
@@ -1049,7 +1049,7 @@ end
 
 function add_entry(x509_name::X509Name, field::String, value::String)
     if ccall((:X509_NAME_add_entry_by_txt, libcrypto), Cint, (X509Name, Cstring, Cint, Cstring, Cint, Cint, Cint), x509_name, field, MBSTRING_ASC, value, -1, -1, 0) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     return nothing
@@ -1064,7 +1064,7 @@ mutable struct X509Certificate
     function X509Certificate()
         x509 = ccall((:X509_new, libcrypto), Ptr{Cvoid}, ())
         if x509 == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         return X509Certificate(x509)
@@ -1087,7 +1087,7 @@ mutable struct X509Certificate
 
         x509 = ccall((:PEM_read_bio_X509, libcrypto), Ptr{Cvoid}, (BIO, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}), bio, C_NULL, C_NULL, C_NULL)
         if x509 == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         x509_cert = new(x509)
@@ -1112,7 +1112,7 @@ function Base.write(io::IO, x509_cert::X509Certificate)
         bio_stream_set_data(bio_stream)
 
         if ccall((:PEM_write_bio_X509, libcrypto), Cint, (BIO, X509Certificate), bio_stream.bio, x509_cert) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
     end
 end
@@ -1121,15 +1121,15 @@ function sign_certificate(x509_cert::X509Certificate, evp_pkey::EvpPKey)
     evp_md = ccall((:EVP_sha256, libcrypto), Ptr{Cvoid}, ())
 
     if ccall((:X509_set_pubkey, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     if ccall((:X509_sign, libcrypto), Cint, (X509Certificate, EvpPKey, Ptr{Cvoid}), x509_cert, evp_pkey, evp_md) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     if ccall((:X509_verify, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -1144,7 +1144,7 @@ end
 
 function set_subject_name(x509_cert::X509Certificate, x509_name::X509Name)
     if ccall((:X509_set_subject_name, libcrypto), Cint, (X509Certificate, X509Name), x509_cert, x509_name) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -1159,14 +1159,14 @@ end
 
 function set_issuer_name(x509_cert::X509Certificate, x509_name::X509Name)
     if ccall((:X509_set_issuer_name, libcrypto), Cint, (X509Certificate, X509Name), x509_cert, x509_name) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
 function get_time_not_before(x509_cert::X509Certificate)::Asn1Time
     asn1_time = ccall((:X509_getm_notBefore, libcrypto), Ptr{Cvoid}, (X509Certificate,), x509_cert)
     if asn1_time == C_NULL
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     asn1_time = Asn1Time(asn1_time)
@@ -1175,14 +1175,14 @@ end
 
 function set_time_not_before(x509_cert::X509Certificate, asn1_time::Asn1Time)
     if ccall((:X509_set1_notBefore, libcrypto), Cint, (X509Certificate, Asn1Time), x509_cert, asn1_time) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
 function get_time_not_after(x509_cert::X509Certificate)::Asn1Time
     asn1_time = ccall((:X509_getm_notAfter, libcrypto), Ptr{Cvoid}, (X509Certificate,), x509_cert)
     if asn1_time == C_NULL
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     asn1_time = Asn1Time(asn1_time)
@@ -1191,7 +1191,7 @@ end
 
 function set_time_not_after(x509_cert::X509Certificate, asn1_time::Asn1Time)
     if ccall((:X509_set1_notAfter, libcrypto), Cint, (X509Certificate, Asn1Time), x509_cert, asn1_time) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -1234,7 +1234,7 @@ mutable struct X509Store
     function X509Store()
         x509_store = ccall((:X509_STORE_new, libcrypto), Ptr{Cvoid}, ())
         if x509_store == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         x509_store = new(x509_store)
@@ -1253,7 +1253,7 @@ end
 
 function add_cert(x509_store::X509Store, x509_certificate::X509Certificate)
     if ccall((:X509_STORE_add_cert, libcrypto), Cint, (X509Store, X509Certificate), x509_store, x509_certificate) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -1268,7 +1268,7 @@ end
 function TLSv12ClientMethod()
     ssl_method = ccall((:TLSv1_2_client_method, libssl), Ptr{Cvoid}, ())
     if ssl_method == C_NULL
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     return SSLMethod(ssl_method)
@@ -1277,7 +1277,7 @@ end
 function TLSv12ServerMethod()
     ssl_method = ccall((:TLSv1_2_server_method, libssl), Ptr{Cvoid}, ())
     if ssl_method == C_NULL
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     return SSLMethod(ssl_method)
@@ -1293,7 +1293,7 @@ mutable struct SSLContext
     function SSLContext(ssl_method::SSLMethod)
         ssl_ctx = ccall((:SSL_CTX_new, libssl), Ptr{Cvoid}, (SSLMethod,), ssl_method)
         if ssl_ctx == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         ssl_context = new(ssl_ctx)
@@ -1322,7 +1322,7 @@ end
 """
 function ssl_set_alpn(ssl_context::SSLContext, protocol_list::String)
     if ccall((:SSL_CTX_set_alpn_protos, libssl), Cint, (SSLContext, Ptr{UInt8}, UInt32), ssl_context, pointer(protocol_list), length(protocol_list)) != 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -1334,19 +1334,19 @@ end
 """
 function ssl_set_ciphersuites(ssl_context::SSLContext, cipher_suites::String)
     if ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (SSLContext, Cstring), ssl_context, cipher_suites) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
 function ssl_use_certificate(ssl_context::SSLContext, x509_cert::X509Certificate)
     if ccall((:SSL_CTX_use_certificate, libssl), Cint, (SSLContext, X509Certificate), ssl_context, x509_cert) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
 function ssl_use_private_key(ssl_context::SSLContext, evp_pkey::EvpPKey)
     if ccall((:SSL_CTX_use_PrivateKey, libssl), Cint, (SSLContext, EvpPKey), ssl_context, evp_pkey) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 end
 
@@ -1359,7 +1359,7 @@ mutable struct SSL
     function SSL(ssl_context::SSLContext, read_bio::BIO, write_bio::BIO)::SSL
         ssl = ccall((:SSL_new, libssl), Ptr{Cvoid}, (SSLContext,), ssl_context)
         if ssl == C_NULL
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         ssl = new(ssl)
@@ -1380,7 +1380,7 @@ end
 
 function ssl_connect(ssl::SSL)
     if ccall((:SSL_connect, libssl), Cint, (SSL,), ssl) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
@@ -1389,7 +1389,7 @@ end
 
 function ssl_accept(ssl::SSL)
     if ccall((:SSL_accept, libssl), Cint, (SSL,), ssl) != 1
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     ccall((:SSL_set_read_ahead, libssl), Cvoid, (SSL, Cint), ssl, Int32(1))
@@ -1462,7 +1462,7 @@ function force_read_buffer(ssl_stream::SSLStream)
         in_buffer = Vector{UInt8}(undef, 1)
         read_count = ccall((:SSL_peek, libssl), Cint, (SSL, Ptr{Int8}, Cint), ssl_stream.ssl, pointer(in_buffer), length(in_buffer))
         if read_count <= 0
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
     end
 end
@@ -1479,7 +1479,7 @@ function Base.unsafe_write(ssl_stream::SSLStream, in_buffer::Ptr{UInt8}, in_leng
 
         write_count = ccall((:SSL_write, libssl), Cint, (SSL, Ptr{Cvoid}, Cint), ssl_stream.ssl, in_buffer, in_length)
         if write_count <= 0
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
     end
 
@@ -1541,7 +1541,7 @@ function Base.read(ssl_stream::SSLStream)::Vector{UInt8}
             if pending_count != 0
                 read_count = ccall((:SSL_read, libssl), Cint, (SSL, Ptr{Int8}, Cint), ssl_stream.ssl, pointer(read_buffer), pending_count)
                 if read_count <= 0
-                    throw(OpenSSLException())
+                    throw(OpenSSLError())
                 end
 
                 resize!(read_buffer, read_count)
@@ -1630,11 +1630,11 @@ mutable struct OpenSSLInit
 
         opts = UInt64(OPENSSL_INIT_LOAD_CRYPTO_STRINGS | OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS | OPENSSL_INIT_ASYNC)
         if ccall((:OPENSSL_init_crypto, libcrypto), UInt64, (Cint, Ptr{Cvoid}), opts, C_NULL) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         if ccall((:OPENSSL_init_ssl, libssl), Cint, (Cint, Ptr{Cvoid}), Cint(OPENSSL_INIT_LOAD_SSL_STRINGS), C_NULL) != 1
-            throw(OpenSSLException())
+            throw(OpenSSLError())
         end
 
         return new()
@@ -1670,7 +1670,7 @@ function Base.String(big_num::BigNum)
     write(bio, "0x")
 
     if ccall((:BN_print, libcrypto), Cint, (BIO, BigNum), bio, big_num) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     result = String(bio_get_mem_data(bio))
@@ -1688,7 +1688,7 @@ function Base.String(asn1_time::Asn1Time)
     bio = BIO(BIOMethod_mem())
 
     if ccall((:ASN1_TIME_print, libcrypto), Cint, (BIO, Asn1Time), bio, asn1_time) == 0
-        throw(OpenSSLException())
+        throw(OpenSSLError())
     end
 
     result = String(bio_get_mem_data(bio))
