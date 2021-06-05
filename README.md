@@ -2,11 +2,5 @@
 
 [OpenSSL](https://www.openssl.org/) Julia bindings.
 
-Testing build status:
-
-| **Documentation**                                                         | **Build Status**                                                                                |
-|:-------------------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------:|
-| [![][docs-stable-img]][docs-stable-url] [![][docs-dev-img]][docs-dev-url] | [![][github-actions-ci-img]][github-actions-ci-url] [![][codecov-img]][codecov-url] |
-
-[github-actions-ci-img]: https://github.com/grlap/OpenSSL.jl/workflows/CI/badge.svg
-
+[![Build Status](https://github.com/grlap/OpenSSL.jl/workflows/CI/badge.svg)](https://github.com/grlap/OpenSSL.jl/actions?query=workflow%3ACI+branch%3Amain)
+[![codecov](https://codecov.io/gh/grlap/OpenSSL.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/grlap/OpenSSL.jl)
