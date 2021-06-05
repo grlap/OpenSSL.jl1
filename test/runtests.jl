@@ -1,5 +1,6 @@
 using Dates
 using OpenSSL
+using OpenSSL_jll
 using Sockets
 using Test
 
@@ -170,6 +171,21 @@ end
     #finalize(ssl_ctx)
 end
 
+@testset "ReadFromInvalidSSLStream" begin
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
+    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
+
+    # Create SSL stream.
+    tcp_stream = connect("www.nghttp2.org", 443)
+    ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
+
+    err = @catch_exception_object read(ssl_stream)
+    @test typeof(err) == OpenSSL.OpenSSLException
+
+    close(ssl_stream)
+    free(ssl_ctx)
+end
+
 @testset "Hash" begin
     res = digest(EVPMD5(), IOBuffer("The quick brown fox jumps over the lazy dog"))
     @test res == UInt8[0x9e, 0x10, 0x7d, 0x9d, 0x37, 0x2b, 0xb6, 0x82, 0x6b, 0xd8, 0x1d, 0x35, 0x42, 0xa4, 0x19, 0xd6,]
@@ -195,10 +211,50 @@ end
     write(iob, x509_certificate)
 
     seek(iob, 0)
-    @show String(read(iob))
+    cert_pem = String(read(iob))
 
-    @show x509_name, String(x509_name)
+    x509_certificate2 = X509Certificate(cert_pem)
+
+    #iob = IOBuffer()
+    #iob2 = IOBuffer()
+
+    #write(iob, x509_certificate)
+    #write(iob2, x509_certificate2)
+
     @show x509_certificate
+    @show x509_certificate2
+end
+
+@testset "VerifyErrorTaskTLS" begin
+    err_msg = OpenSSL.get_error()
+    @test err_msg == ""
+
+    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
+
+    # Make direct invalid call to OpenSSL
+    invalid_cipher_suites = "TLS_AES_356_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"
+    result = ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (OpenSSL.SSLContext, Cstring), ssl_ctx, invalid_cipher_suites)
+
+    # Verify the error message.
+    err_msg = OpenSSL.get_error()
+    @test contains(err_msg, "no cipher match")
+
+    # Ensure error queue is empty.
+    err_msg = OpenSSL.get_error()
+    @test err_msg == ""
+
+    # Make invalid OpenSSL (with fail and OpenSSL updates internal error queue).
+    result = ccall((:SSL_CTX_set_ciphersuites, libssl), Cint, (OpenSSL.SSLContext, Cstring), ssl_ctx, invalid_cipher_suites)
+    # Copy and clear OpenSSL error queue to task TLS.
+    OpenSSL.update_tls_error_state()
+    # OpenSSL queue should be empty right now.
+    @test ccall((:ERR_peek_error, libcrypto), Culong, ()) == 0
+
+    # Verify the error message, error message should be retrived from the task TLS.
+    err_msg = OpenSSL.get_error()
+    @test contains(err_msg, "no cipher match")
+
+    free(ssl_ctx)
 end
 
 function test_server()
@@ -277,45 +333,3 @@ function test_client()
     finalize(ssl_ctx)
     return nothing
 end
-
-@show OpenSSL.OpenSSLException()
-
-ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
-result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
-println("======>")
-result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-OpenSSL.update_tls_error_state()
-result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-println("Abc:")
-println("$(OpenSSL.OpenSSLException().msg)")
-println("Def:")
-println("$(OpenSSL.OpenSSLException().msg)")
-
-t = @task begin
-    println("$(objectid(current_task()))")
-
-    ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ServerMethod())
-    @show ssl_ctx
-    result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
-    @show result
-    result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-    @show result
-
-    sleep(1)
-    throw(OpenSSL.OpenSSLException())
-    println("done")
-end
-
-#println("$(objectid(current_task()))")
-#schedule(t);
-
-try
-    #    wait(t)
-catch ex
-    #    @show ex.task.exception
-end
-
-println("First ex:")
-@show OpenSSL.OpenSSLException()
