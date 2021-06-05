@@ -128,14 +128,12 @@ end
     finalize(ssl_ctx)
 end
 
-@testset "ClosedConnection" begin
+@testset "ClosedStream" begin
     tcp_stream = connect("www.nghttp2.org", 443)
 
     ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
     result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
-    @show result
-    result = OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
-    @show result
+    OpenSSL.ssl_set_ciphersuites(ssl_ctx, "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256")
 
     ssl_stream = SSLStream(ssl_ctx, tcp_stream, tcp_stream)
 
@@ -152,7 +150,7 @@ end
     finalize(ssl_ctx)
 end
 
-@testset "NoCloseOnSSLStream" begin
+@testset "NoCloseStream" begin
     ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
     result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
@@ -172,7 +170,7 @@ end
     #finalize(ssl_ctx)
 end
 
-@testset "ReadFromInvalidSSLStream" begin
+@testset "InvalidStream" begin
     ssl_ctx = OpenSSL.SSLContext(OpenSSL.TLSv12ClientMethod())
     result = OpenSSL.ssl_set_options(ssl_ctx, OpenSSL.SSL_OP_NO_COMPRESSION)
 
@@ -222,7 +220,7 @@ end
     @test x509_string == x509_string2
 end
 
-@testset "VerifyErrorTaskTLS" begin
+@testset "ErrorTaskTLS" begin
     err_msg = OpenSSL.get_error()
     @test err_msg == ""
 
