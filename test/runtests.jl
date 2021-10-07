@@ -246,25 +246,39 @@ end
 
     # Create a certificate sign request.
     evp_pkey = EvpPKey(rsa_generate_key())
-    x509_req = X509Request()
+    x509_request = X509Request()
 
     x509_name = X509Name()
     add_entry(x509_name, "C", "US")
     add_entry(x509_name, "ST", "Isles of Redmond")
     add_entry(x509_name, "CN", "www.redmond.com")
 
-    x509_req.subject_name = x509_name
+    x509_request.subject_name = x509_name
 
-    sign_request(x509_req, evp_pkey)
+    sign_request(x509_request, evp_pkey)
 
-    @show x509_req
+    @show x509_request.public_key
+
+    @show x509_request
 
     # Create a certificate.
     x509_certificate = X509Certificate()
+    x509_certificate.version = 2
+
+    # Set issuer and subject name of the cert from the req and CA.
+    x509_certificate.subject_name = x509_request.subject_name
+    x509_certificate.issuer_name = root_certificate.subject_name
+
+    # Set public key
+    x509_certificate.public_key = x509_request.public_key
+
     adjust(x509_certificate.time_not_before, Second(0))
     adjust(x509_certificate.time_not_after, Year(1))
 
-    x509_certificate.issuer_name = root_certificate.subject_name
+    # TODO
+    # EVP_PKEY CApkey 
+    # sign()
+
     @show x509_certificate
     @show x509_certificate.version
 end

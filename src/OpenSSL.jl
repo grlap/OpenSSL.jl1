@@ -1232,39 +1232,47 @@ function get_public_key(x509_cert::X509Certificate)::EvpPKey
     return EvpPKey(evp_pkey)
 end
 
-function Base.getproperty(x509_certificate::X509Certificate, name::Symbol)
-    if name === :subject_name
-        return get_subject_name(x509_certificate)
-    elseif name === :issuer_name
-        return get_issuer_name(x509_certificate)
-    elseif name === :time_not_before
-        return get_time_not_before(x509_certificate)
-    elseif name === :time_not_after
-        return get_time_not_after(x509_certificate)
-    elseif name === :version
-        return get_version(x509_certificate)
-    elseif name === :public_key
-        return get_public_key(x509_certificate)
-    else
-        # fallback to getfield
-        return getfield(x509_certificate, name)
+function set_public_key(x509_cert::X509Certificate, evp_pkey::EvpPKey)
+    if ccall((:X509_set_pubkey, libcrypto), Cint, (X509Certificate, EvpPKey), x509_cert, evp_pkey) == 0
+        throw(OpenSSLError())
     end
 end
 
-function Base.setproperty!(x509_certificate::X509Certificate, name::Symbol, value)
+function Base.getproperty(x509_cert::X509Certificate, name::Symbol)
     if name === :subject_name
-        set_subject_name(x509_certificate, value)
+        return get_subject_name(x509_cert)
     elseif name === :issuer_name
-        set_issuer_name(x509_certificate, value)
+        return get_issuer_name(x509_cert)
     elseif name === :time_not_before
-        set_time_not_before(x509_certificate, value)
+        return get_time_not_before(x509_cert)
     elseif name === :time_not_after
-        set_time_not_after(x509_certificate, value)
+        return get_time_not_after(x509_cert)
     elseif name === :version
-        set_version(x509_certificate, value)
+        return get_version(x509_cert)
+    elseif name === :public_key
+        return get_public_key(x509_cert)
+    else
+        # fallback to getfield
+        return getfield(x509_cert, name)
+    end
+end
+
+function Base.setproperty!(x509_cert::X509Certificate, name::Symbol, value)
+    if name === :subject_name
+        set_subject_name(x509_cert, value)
+    elseif name === :issuer_name
+        set_issuer_name(x509_cert, value)
+    elseif name === :time_not_before
+        set_time_not_before(x509_cert, value)
+    elseif name === :time_not_after
+        set_time_not_after(x509_cert, value)
+    elseif name === :version
+        set_version(x509_cert, value)
+    elseif name === :public_key
+        set_public_key(x509_cert, value)
     else
         # fallback to setfield
-        setfield!(x509_certificate, name, value)
+        setfield!(x509_cert, name, value)
     end
 end
 
@@ -1410,8 +1418,8 @@ function free(x509_store::X509Store)
     return nothing
 end
 
-function add_cert(x509_store::X509Store, x509_certificate::X509Certificate)
-    if ccall((:X509_STORE_add_cert, libcrypto), Cint, (X509Store, X509Certificate), x509_store, x509_certificate) != 1
+function add_cert(x509_store::X509Store, x509_cert::X509Certificate)
+    if ccall((:X509_STORE_add_cert, libcrypto), Cint, (X509Store, X509Certificate), x509_store, x509_cert) != 1
         throw(OpenSSLError())
     end
 end
