@@ -1211,6 +1211,18 @@ function set_time_not_after(x509_cert::X509Certificate, asn1_time::Asn1Time)
     end
 end
 
+function get_version(x509_cert::X509Certificate)::Int
+    version = ccall((:X509_get_version, libcrypto), Clong, (X509Certificate,), x509_cert)
+
+    return Int(version)
+end
+
+function set_version(x509_cert::X509Certificate, version::Int)
+    if ccall((:X509_set_version, libcrypto), Cint, (X509Certificate, Cint), x509_cert, version) == 0
+        throw(OpenSSLError())
+    end
+end
+
 function get_public_key(x509_cert::X509Certificate)::EvpPKey
     evp_pkey = ccall((:X509_get_pubkey, libcrypto), Ptr{Cvoid}, (X509Certificate,), x509_cert)
     if evp_pkey == C_NULL
@@ -1229,6 +1241,8 @@ function Base.getproperty(x509_certificate::X509Certificate, name::Symbol)
         return get_time_not_before(x509_certificate)
     elseif name === :time_not_after
         return get_time_not_after(x509_certificate)
+    elseif name === :version
+        return get_version(x509_certificate)
     elseif name === :public_key
         return get_public_key(x509_certificate)
     else
@@ -1246,6 +1260,8 @@ function Base.setproperty!(x509_certificate::X509Certificate, name::Symbol, valu
         set_time_not_before(x509_certificate, value)
     elseif name === :time_not_after
         set_time_not_after(x509_certificate, value)
+    elseif name === :version
+        set_version(x509_certificate, value)
     else
         # fallback to setfield
         setfield!(x509_certificate, name, value)

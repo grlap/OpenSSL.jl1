@@ -226,6 +226,25 @@ end
 #https://mariadb.com/docs/security/encryption/in-transit/create-self-signed-certificates-keys-openssl/
 #https://chromium.googlesource.com/chromiumos/platform/entd/+/fb446ee0213243fc4ca1ade16bb56ecde8935ea5/pkcs11.cc
 @testset "SignCertCertificate" begin
+    # Create a root certificate.
+    evp_pkey = EvpPKey(rsa_generate_key())
+    x509_certificate = X509Certificate()
+    x509_name = X509Name()
+    add_entry(x509_name, "C", "US")
+    add_entry(x509_name, "ST", "Isles of Redmond")
+    add_entry(x509_name, "CN", "www.redmond.com")
+
+    adjust(x509_certificate.time_not_before, Second(0))
+    adjust(x509_certificate.time_not_after, Year(1))
+
+    x509_certificate.subject_name = x509_name
+    x509_certificate.issuer_name = x509_name
+
+    sign_certificate(x509_certificate, evp_pkey)
+
+    root_certificate = x509_certificate
+
+    # Create a certificate sign request.
     evp_pkey = EvpPKey(rsa_generate_key())
     x509_req = X509Request()
 
@@ -239,6 +258,15 @@ end
     sign_request(x509_req, evp_pkey)
 
     @show x509_req
+
+    # Create a certificate.
+    x509_certificate = X509Certificate()
+    adjust(x509_certificate.time_not_before, Second(0))
+    adjust(x509_certificate.time_not_after, Year(1))
+
+    x509_certificate.issuer_name = root_certificate.subject_name
+    @show x509_certificate
+    @show x509_certificate.version
 end
 
 @testset "ErrorTaskTLS" begin
