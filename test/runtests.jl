@@ -190,7 +190,7 @@ end
     @test res == UInt8[0x9e, 0x10, 0x7d, 0x9d, 0x37, 0x2b, 0xb6, 0x82, 0x6b, 0xd8, 0x1d, 0x35, 0x42, 0xa4, 0x19, 0xd6,]
 end
 
-@testset "SelfSigned" begin
+@testset "SelfSignedCertificate" begin
     evp_pkey = EvpPKey(rsa_generate_key())
     x509_certificate = X509Certificate()
     x509_name = X509Name()
@@ -217,10 +217,28 @@ end
     x509_string = String(x509_certificate)
     x509_string2 = String(x509_certificate2)
 
-    public_key = get_public_key(x509_certificate)
+    public_key = x509_certificate.public_key
     @show public_key
 
     @test x509_string == x509_string2
+end
+
+#https://mariadb.com/docs/security/encryption/in-transit/create-self-signed-certificates-keys-openssl/
+#https://chromium.googlesource.com/chromiumos/platform/entd/+/fb446ee0213243fc4ca1ade16bb56ecde8935ea5/pkcs11.cc
+@testset "SignCertCertificate" begin
+    evp_pkey = EvpPKey(rsa_generate_key())
+    x509_req = X509Request()
+
+    x509_name = X509Name()
+    add_entry(x509_name, "C", "US")
+    add_entry(x509_name, "ST", "Isles of Redmond")
+    add_entry(x509_name, "CN", "www.redmond.com")
+
+    x509_req.subject_name = x509_name
+
+    sign_request(x509_req, evp_pkey)
+
+    @show x509_req
 end
 
 @testset "ErrorTaskTLS" begin

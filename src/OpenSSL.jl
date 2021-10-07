@@ -19,10 +19,10 @@ Error handling:
     we clear the OpenSSL error queue, and store the error messages in Julia task TLS.
 """
 
-export TLSv12ClientMethod, TLSv12ServerMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate, X509Store, EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB,
-       EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest, EVPMDNull,
-       EVPMD2, EVPMD5, EVPSHA1, rsa_generate_key, add_entry, sign_certificate, get_public_key, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read, unsafe_write,
-       connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
+export TLSv12ClientMethod, TLSv12ServerMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate, X509Store, X509Request, EVPCipherContext, EVPBlowFishCBC,
+       EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest,
+       EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, rsa_generate_key, add_entry, sign_certificate, sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
+       unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
 
 const Option{T} = Union{Nothing,T} where {T}
 
@@ -1113,15 +1113,6 @@ function free(x509_cert::X509Certificate)
     return nothing
 end
 
-function get_public_key(x509_cert::X509Certificate)
-    evp_pkey = ccall((:X509_get_pubkey, libcrypto), Ptr{Cvoid}, (X509Certificate,), x509_cert)
-    if evp_pkey == C_NULL
-        throw(OpenSSLError())
-    end
-
-    return EvpPKey(evp_pkey)
-end
-
 function Base.write(io::IO, x509_cert::X509Certificate)
     bio_stream = OpenSSL.BIOStream(io)
 
@@ -1220,6 +1211,15 @@ function set_time_not_after(x509_cert::X509Certificate, asn1_time::Asn1Time)
     end
 end
 
+function get_public_key(x509_cert::X509Certificate)::EvpPKey
+    evp_pkey = ccall((:X509_get_pubkey, libcrypto), Ptr{Cvoid}, (X509Certificate,), x509_cert)
+    if evp_pkey == C_NULL
+        throw(OpenSSLError())
+    end
+
+    return EvpPKey(evp_pkey)
+end
+
 function Base.getproperty(x509_certificate::X509Certificate, name::Symbol)
     if name === :subject_name
         return get_subject_name(x509_certificate)
@@ -1229,7 +1229,10 @@ function Base.getproperty(x509_certificate::X509Certificate, name::Symbol)
         return get_time_not_before(x509_certificate)
     elseif name === :time_not_after
         return get_time_not_after(x509_certificate)
-    else # fallback to getfield
+    elseif name === :public_key
+        return get_public_key(x509_certificate)
+    else
+        # fallback to getfield
         return getfield(x509_certificate, name)
     end
 end
@@ -1243,8 +1246,123 @@ function Base.setproperty!(x509_certificate::X509Certificate, name::Symbol, valu
         set_time_not_before(x509_certificate, value)
     elseif name === :time_not_after
         set_time_not_after(x509_certificate, value)
-    else # fallback to setfield
+    else
+        # fallback to setfield
         setfield!(x509_certificate, name, value)
+    end
+end
+
+"""
+    X509 Request.
+"""
+mutable struct X509Request
+    x509_req::Ptr{Cvoid}
+
+    function X509Request()
+        x509_req = ccall((:X509_REQ_new, libcrypto), Ptr{Cvoid}, ())
+        if x509_req == C_NULL
+            throw(OpenSSLError())
+        end
+
+        return X509Request(x509_req)
+    end
+
+    function X509Request(x509::Ptr{Cvoid})
+        x509_req = new(x509)
+        finalizer(free, x509_req)
+
+        return x509_req
+    end
+end
+
+function free(x509_req::X509Request)
+    ccall((:X509_REQ_free, libcrypto), Cvoid, (X509Request,), x509_req)
+
+    x509_req.x509_req = C_NULL
+    return nothing
+end
+
+function Base.write(io::IO, x509_req::X509Request)
+    bio_stream = OpenSSL.BIOStream(io)
+
+    GC.@preserve bio_stream begin
+        bio_stream_set_data(bio_stream)
+
+        if ccall((:PEM_write_bio_X509_REQ, libcrypto), Cint, (BIO, X509Request), bio_stream.bio, x509_req) != 1
+            throw(OpenSSLError())
+        end
+    end
+end
+
+function sign_request(x509_req::X509Request, evp_pkey::EvpPKey)
+    evp_md = ccall((:EVP_sha256, libcrypto), Ptr{Cvoid}, ())
+
+    if ccall((:X509_REQ_set_pubkey, libcrypto), Cint, (X509Request, EvpPKey), x509_req, evp_pkey) != 1
+        throw(OpenSSLError())
+    end
+
+    if ccall((:X509_REQ_sign, libcrypto), Cint, (X509Request, EvpPKey, Ptr{Cvoid}), x509_req, evp_pkey, evp_md) == 0
+        throw(OpenSSLError())
+    end
+
+    if ccall((:X509_REQ_verify, libcrypto), Cint, (X509Request, EvpPKey), x509_req, evp_pkey) != 1
+        throw(OpenSSLError())
+    end
+end
+
+function get_subject_name(x509_req::X509Request)::X509Name
+    x509_name = ccall((:X509_REQ_get_subject_name, libcrypto), Ptr{Cvoid}, (X509Request,), x509_req)
+
+    # Duplicate x509_name as it is an internal pointer and must not be freed.
+    x509_name = ccall((:X509_NAME_dup, libcrypto), Ptr{Cvoid}, (Ptr{Cvoid},), x509_name)
+
+    if x509_name == C_NULL
+        throw(OpenSSLError())
+    end
+
+    return X509Name(x509_name)
+end
+
+function set_subject_name(x509_req::X509Request, x509_name::X509Name)
+    if ccall((:X509_REQ_set_subject_name, libcrypto), Cint, (X509Request, X509Name), x509_req, x509_name) == 0
+        throw(OpenSSLError())
+    end
+end
+
+function get_public_key(x509_req::X509Request)::EvpPKey
+    evp_pkey = ccall((:X509_REQ_get_pubkey, libcrypto), Ptr{Cvoid}, (X509Request,), x509_req)
+    if evp_pkey == C_NULL
+        throw(OpenSSLError())
+    end
+
+    return EvpPKey(evp_pkey)
+end
+
+function set_public_key(x509_req::X509Request, evp_pkey::EvpPKey)
+    if ccall((:X509_REQ_set_pubkey, libcrypto), Cint, (X509Request, EvpPKey), x509_req, evp_pkey) == 0
+        throw(OpenSSLError())
+    end
+end
+
+function Base.getproperty(x509_req::X509Request, name::Symbol)
+    if name === :subject_name
+        return get_subject_name(x509_req)
+    elseif name === :public_key
+        return get_public_key(x509_req)
+    else
+        # fallback to getfield
+        return getfield(x509_req, name)
+    end
+end
+
+function Base.setproperty!(x509_req::X509Request, name::Symbol, value)
+    if name === :subject_name
+        set_subject_name(x509_req, value)
+    elseif name === :public_key
+        set_public_key(x509_req, value)
+    else
+        # fallback to setfield
+        setfield!(x509_req, name, value)
     end
 end
 
@@ -1736,6 +1854,16 @@ function Base.String(x509_cert::X509Certificate)
     return String(read(io))
 end
 
+function Base.String(x509_cert::X509Request)
+    io = IOBuffer()
+
+    println(io, """
+        subject_name: $(x509_cert.subject_name)""")
+
+    seek(io, 0)
+    return String(read(io))
+end
+
 function Base.String(evp_pkey::EvpPKey)
     io = IOBuffer()
 
@@ -1760,6 +1888,8 @@ Base.show(io::IO, asn1_time::Asn1Time) = write(io, String(asn1_time))
 Base.show(io::IO, x509_name::X509Name) = write(io, String(x509_name))
 
 Base.show(io::IO, x509_cert::X509Certificate) = write(io, String(x509_cert))
+
+Base.show(io::IO, x509_req::X509Request) = write(io, String(x509_req))
 
 Base.show(io::IO, evp_pkey::EvpPKey) = write(io, String(evp_pkey))
 
