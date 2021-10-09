@@ -46,6 +46,9 @@ end
 
     n1 = BigNum(0x11)
     @test String(n1 % n2) == "0x1"
+
+    n1 = BigNum(0x3)
+    @test String(n1 * n2) == "0xC"
 end
 
 @testset "Asn1Time" begin
