@@ -19,13 +19,14 @@ Error handling:
     we clear the OpenSSL error queue, and store the error messages in Julia task TLS.
 """
 
-export TLSv12ClientMethod, TLSv12ServerMethod, SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name, X509Certificate,
-    X509Request, P12Object, X509Store, EVPCipherContext,
-    EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB,
-    EVPAES128OFB, EVPDigestContext, digest_init, digest_update,
-    digest_final, digest, EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, rsa_generate_key, add_entry, sign_certificate,
-    sign_request, adjust, add_cert, eof, isreadable, iswritable,
-    bytesavailable, read, unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
+export TLSv12ClientMethod, TLSv12ServerMethod,
+    SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name,
+    X509Certificate, X509Request, X509Store, X509Stack, P12Object,
+    EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB,
+    EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest,
+    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, rsa_generate_key, add_entry, sign_certificate,
+    sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
+    unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
 
 const Option{T} = Union{Nothing,T} where {T}
 
@@ -1867,7 +1868,7 @@ mutable struct X509Stack
 
     function X509Stack()
         x509_stack = ccall(
-            (:sk_X509_new_null, libssl),
+            (:OPENSSL_sk_new_null, libcrypto),
             Ptr{Cvoid},
             ())
         if x509_stack == C_NULL
@@ -1880,7 +1881,7 @@ end
 
 function free(x509_stack::X509Stack)
     ccall(
-        (:OPENSSL_sk_free, libssl),
+        (:OPENSSL_sk_free, libcrypto),
         Cvoid,
         (X509Stack,),
         x509_stack)
