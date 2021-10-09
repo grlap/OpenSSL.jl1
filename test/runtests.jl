@@ -230,6 +230,13 @@ end
 
     p12 = P12Object(evp_pkey, x509_certificate)
     @show p12
+    io = IOBuffer()
+    write(io, p12)
+
+    OpenSSL.unpack(p12)
+
+    seek(io, 0)
+    @show "p12:" String(read(io))
 end
 
 #https://mariadb.com/docs/security/encryption/in-transit/create-self-signed-certificates-keys-openssl/

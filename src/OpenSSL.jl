@@ -1805,6 +1805,91 @@ function Base.setproperty!(x509_req::X509Request, name::Symbol, value)
 end
 
 """
+    X509 Store.
+"""
+mutable struct X509Store
+    x509_store::Ptr{Cvoid}
+
+    function X509Store(x509_store::Ptr{Cvoid})
+        x509_store = new(x509_store)
+        finalizer(free, x509_store)
+
+        return x509_store
+    end
+
+    function X509Store()
+        x509_store = ccall(
+            (:X509_STORE_new, libcrypto),
+            Ptr{Cvoid},
+            ())
+        if x509_store == C_NULL
+            throw(OpenSSLError())
+        end
+
+        return X509Store(x509_store)
+    end
+end
+
+function free(x509_store::X509Store)
+    ccall(
+        (:X509_STORE_free, libcrypto),
+        Cvoid,
+        (X509Store,),
+        x509_store)
+
+    x509_store.x509_store = C_NULL
+    return nothing
+end
+
+function add_cert(x509_store::X509Store, x509_cert::X509Certificate)
+    if ccall(
+        (:X509_STORE_add_cert, libcrypto),
+        Cint,
+        (X509Store, X509Certificate),
+        x509_store,
+        x509_cert) != 1
+        throw(OpenSSLError())
+    end
+end
+
+"""
+    X509 certificate stack.
+"""
+mutable struct X509Stack
+    x509_stack::Ptr{Cvoid}
+
+    function X509Stack(x509_stack::Ptr{Cvoid})
+        x509_stack = new(x509_stack)
+
+        finalizer(free, x509_stack)
+        return x509_stack
+    end
+
+    function X509Stack()
+        x509_stack = ccall(
+            (:sk_X509_new_null, libssl),
+            Ptr{Cvoid},
+            ())
+        if x509_stack == C_NULL
+            throw(OpenSSLError())
+        end
+
+        return X509Stack(x509_stack)
+    end
+end
+
+function free(x509_stack::X509Stack)
+    ccall(
+        (:OPENSSL_sk_free, libssl),
+        Cvoid,
+        (X509Stack,),
+        x509_stack)
+
+    x509_stack.x509_stack = C_NULL
+    return nothing
+end
+
+"""
     PKCS12 - Public Key Cryptography Standard #12
 """
 mutable struct P12Object
@@ -1863,50 +1948,45 @@ function free(p12_object::P12Object)
     return nothing
 end
 
-"""
-    X509 Store.
-"""
-mutable struct X509Store
-    x509_store::Ptr{Cvoid}
+function Base.write(io::IO, p12_object::P12Object)
+    bio_stream = OpenSSL.BIOStream(io)
 
-    X509Store(x509_store::Ptr{Cvoid}) = new(x509_store)
+    GC.@preserve bio_stream begin
+        bio_stream_set_data(bio_stream)
 
-    function X509Store()
-        x509_store = ccall(
-            (:X509_STORE_new, libcrypto),
-            Ptr{Cvoid},
-            ())
-        if x509_store == C_NULL
+        if ccall(
+            (:i2d_PKCS12_bio, libcrypto),
+            Cint,
+            (BIO, P12Object),
+            bio_stream.bio,
+            p12_object) != 1
             throw(OpenSSLError())
         end
-
-        x509_store = new(x509_store)
-        finalizer(free, x509_store)
-
-        return x509_store
     end
 end
 
-function free(x509_store::X509Store)
-    ccall(
-        (:X509_STORE_free, libcrypto),
-        Cvoid,
-        (X509Store,),
-        x509_store)
+function unpack(p12_object::P12Object)
+    evp_pkey::EvpPKey = EvpPKey(C_NULL)
+    x509_cert::X509Certificate = X509Certificate(C_NULL)
+    x509_stack::X509Stack = X509Stack(C_NULL)
 
-    x509_store.x509_store = C_NULL
-    return nothing
-end
-
-function add_cert(x509_store::X509Store, x509_cert::X509Certificate)
     if ccall(
-        (:X509_STORE_add_cert, libcrypto),
+        (:PKCS12_parse, libcrypto),
         Cint,
-        (X509Store, X509Certificate),
-        x509_store,
-        x509_cert) != 1
+        (P12Object, Cstring, Ref{EvpPKey}, Ref{X509Certificate}, Ref{X509Stack}),
+        p12_object,
+        C_NULL,
+        evp_pkey,
+        x509_cert,
+        x509_stack) != 1
         throw(OpenSSLError())
     end
+
+    @show "private:"
+    @show evp_pkey
+
+    @show "public:"
+    @show x509_cert
 end
 
 """
