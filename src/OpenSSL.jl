@@ -24,9 +24,9 @@ export TLSv12ClientMethod, TLSv12ServerMethod,
     X509Certificate, X509Request, X509Store, X509Stack, P12Object,
     EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB,
     EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest,
-    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, rsa_generate_key, add_entry, sign_certificate,
+    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, EVPDSS1, rsa_generate_key, add_entry, sign_certificate,
     sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
-    unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN
+    unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN, version
 
 const Option{T} = Union{Nothing,T} where {T}
 
@@ -333,6 +333,28 @@ const EVP_MAX_BLOCK_LENGTH = 32
 
 # define RSA_3   0x3L
 # define RSA_F4  0x10001L
+
+@enum(OpenSSLVersion::Int32,
+    # The text variant of the version number and the release date.
+    OPENSSL_VERSION = 0,
+    # The compiler flags set for the compilation process.
+    OPENSSL_CFLAGS = 1,
+    # The date of the build process.
+    OPENSSL_BUILT_ON = 2,
+    # The "Configure" target of the library build.
+    OPENSSL_PLATFORM = 3,
+    # The "OPENSSLDIR" setting of the library build.
+    OPENSSL_DIR = 4,
+    # The "ENGINESDIR" setting of the library build.
+    OPENSSL_ENGINES_DIR = 5,
+    # The short version identifier string.
+    OPENSSL_VERSION_STRING = 6,
+    # The longer version identifier string
+    OPENSSL_FULL_VERSION_STRING = 7,
+    # The MODULESDIR setting of the library.
+    OPENSSL_MODULES_DIR = 8,
+    # The current OpenSSL cpu settings
+    OPENSSL_CPU_INFO = 9)
 
 """
     OpenSSL error.
@@ -734,6 +756,8 @@ EVPSHA256()::EVPDigest = EVPDigest(ccall((:EVP_sha256, libcrypto), Ptr{Cvoid}, (
 EVPSHA384()::EVPDigest = EVPDigest(ccall((:EVP_sha384, libcrypto), Ptr{Cvoid}, ()))
 
 EVPSHA512()::EVPDigest = EVPDigest(ccall((:EVP_sha512, libcrypto), Ptr{Cvoid}, ()))
+
+EVPDSS1()::EVPDigest = EVPDigest(ccall((:EVP_dss1, libcrypto), Ptr{Cvoid}, ()))
 
 """
     EVP Message Digest Context.
@@ -1983,11 +2007,7 @@ function unpack(p12_object::P12Object)
         throw(OpenSSLError())
     end
 
-    @show "private:"
-    @show evp_pkey
-
-    @show "public:"
-    @show x509_cert
+    return evp_pkey, x509_cert, x509_stack
 end
 
 """
@@ -2730,6 +2750,16 @@ function update_tls_error_state()
         error_str = get_error()
         task_local_storage(:openssl_err, error_str)
     end
+end
+
+function version(version_type::OpenSSLVersion = OPENSSL_VERSION)::String
+    version = ccall(
+        (:OpenSSL_version, libcrypto),
+        Cstring,
+        (Cint,),
+        version_type)
+
+    return unsafe_string(version)
 end
 
 const OPEN_SSL_INIT = Ref{OpenSSLInit}()

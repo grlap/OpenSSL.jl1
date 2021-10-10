@@ -300,17 +300,6 @@ end
 
     sign_certificate(x509_certificate, evp_pkey_ca)
     @show x509_certificate
-    # TODO
-    # EVP_PKEY CApkey 
-    # sign()
-
-    io = IOBuffer()
-    write(io, x509_certificate)
-    seek(io, 0)
-    @show String(read(io))
-
-    @show x509_certificate
-    @show x509_certificate.version
 end
 
 @testset "ErrorTaskTLS" begin
@@ -426,4 +415,30 @@ function test_client()
     close(ssl_stream)
     finalize(ssl_ctx)
     return nothing
+end
+
+@testset "PKCS12" begin
+    x509_certificate = X509Certificate()
+
+    evp_pkey = EvpPKey(rsa_generate_key())
+    x509_certificate.public_key = evp_pkey
+
+    x509_name = X509Name()
+    add_entry(x509_name, "C", "US")
+    add_entry(x509_name, "ST", "Isles of Redmond")
+    add_entry(x509_name, "CN", "www.redmond.com")
+
+    x509_certificate.subject_name = x509_name
+    x509_certificate.issuer_name = x509_name
+
+    adjust(x509_certificate.time_not_before, Second(0))
+    adjust(x509_certificate.time_not_after, Year(1))
+
+    sign_certificate(x509_certificate, evp_pkey)
+
+    p12_object = P12Object(evp_pkey, x509_certificate)
+
+    open("file.p12", "a") do io
+        write(io, p12_object)
+    end
 end
