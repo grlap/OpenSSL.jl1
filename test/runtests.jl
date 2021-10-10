@@ -31,6 +31,12 @@ end
     @test OpenSSL.BIO_STREAM_CALLBACKS.x.on_bio_ctrl_ptr != C_NULL
 end
 
+@testset "RandomBytes" begin
+    random_data = random_bytes(64)
+
+    @test length(random_data) == 64
+end
+
 @testset "BigNumbers" begin
     n1 = BigNum(0x4)
     n2 = BigNum(0x8)
@@ -441,4 +447,11 @@ end
     open("file.p12", "a") do io
         write(io, p12_object)
     end
+
+    @show evp_pkey.key_type
+end
+
+@testset "Encrypt" begin
+    evp_cipher_ctx = EVPCipherContext()
+    @test 1 == 1
 end

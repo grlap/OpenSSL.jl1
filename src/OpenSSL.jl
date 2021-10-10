@@ -24,8 +24,8 @@ export TLSv12ClientMethod, TLSv12ServerMethod,
     X509Certificate, X509Request, X509Store, X509Stack, P12Object,
     EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB,
     EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest,
-    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, EVPDSS1, rsa_generate_key, add_entry, sign_certificate,
-    sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
+    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, EVPDSS1, random_bytes, rsa_generate_key, add_entry, 
+    sign_certificate, sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
     unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN, version
 
 const Option{T} = Union{Nothing,T} where {T}
@@ -334,6 +334,58 @@ const EVP_MAX_BLOCK_LENGTH = 32
 # define RSA_3   0x3L
 # define RSA_F4  0x10001L
 
+@enum(EvpPKeyType::Int32,
+    # define NID_undef 0
+    EVP_PKEY_NONE  = 0,
+    # define NID_rsaEncryption 6
+    EVP_PKEY_RSA = 6,
+    # define NID_rsa 19
+    EVP_PKEY_RSA2 = 19, 
+    # define NID_rsassaPss 912
+    EVP_PKEY_RSA_PSS = 912,
+    # define NID_dsa 116
+    EVP_PKEY_DSA = 116,
+    # define NID_dsa_2 67
+    EVP_PKEY_DSA1 = 67,
+    # define NID_dsaWithSHA 66
+    EVP_PKEY_DSA2 = 66,
+    # define NID_dsaWithSHA1 113
+    EVP_PKEY_DSA3 = 113,
+    # define NID_dsaWithSHA1_2 70
+    EVP_PKEY_DSA4 = 70,
+    # define NID_dhKeyAgreement 28
+    EVP_PKEY_DH = 28,
+    # define NID_dhpublicnumber 920
+    EVP_PKEY_DHX = 920,
+    # define NID_X9_62_id_ecPublicKey 408
+    EVP_PKEY_EC = 408,
+    # define NID_sm2 1172
+    EVP_PKEY_SM2 = 1172,
+    # define NID_hmac 855
+    EVP_PKEY_HMAC = 855,
+    # define NID_cmac 894
+    EVP_PKEY_CMAC = 894,
+    # define NID_id_scrypt 973
+    EVP_PKEY_SCRYPT = 973,
+    # define NID_tls1_prf 1021
+    EVP_PKEY_TLS1_PRF = 1021,
+    # define NID_hkdf 1036
+    EVP_PKEY_HKDF = 1036,
+    # define NID_poly1305 1061
+    EVP_PKEY_POLY1305 = 1061,
+    # define NID_siphash 1062
+    EVP_PKEY_SIPHASH = 1062,
+    # define NID_X25519 1034
+    EVP_PKEY_X25519 = 1034,
+    # define NID_ED25519 1087
+    EVP_PKEY_ED25519 = 1087,
+    # define NID_X448 1035
+    EVP_PKEY_X448 = 1035,
+    # define NID_ED448 1088
+    EVP_PKEY_ED448 = 1088)
+
+const RSA_F4 = 0x10001
+
 @enum(OpenSSLVersion::Int32,
     # The text variant of the version number and the release date.
     OPENSSL_VERSION = 0,
@@ -363,6 +415,29 @@ struct OpenSSLError <: Exception
     msg::AbstractString
 
     OpenSSLError() = new(get_error())
+end
+
+"""
+    Random bytes.
+"""
+function random_bytes!(rand_data::Vector{UInt8})
+    GC.@preserve rand_data begin
+        if ccall(
+            (:RAND_bytes, libcrypto),
+            Cint,
+            (Ptr{UInt8}, Cint),
+            pointer(rand_data),
+            length(rand_data)) != 1
+            throw(OpenSSLError())
+        end
+    end
+end
+
+function random_bytes(length)
+    rand_data = Vector{UInt8}(undef, length)
+    random_bytes!(rand_data)
+
+    return rand_data
 end
 
 """
@@ -429,7 +504,7 @@ mutable struct BigNum
             (:BN_set_word, libcrypto),
             Cint,
             (BigNum, UInt64),
-            big_num, value) == 0
+            big_num, value) != 1
             throw(OpenSSLError())
         end
 
@@ -457,7 +532,7 @@ function Base.:+(a::BigNum, b::BigNum)::BigNum
         (BigNum, BigNum, BigNum),
         r,
         a,
-        b) == 0
+        b) != 1
         throw(OpenSSLError())
     end
 
@@ -473,7 +548,7 @@ function Base.:-(a::BigNum, b::BigNum)::BigNum
         (BigNum, BigNum, BigNum),
         r,
         a,
-        b) == 0
+        b) != 1
         throw(OpenSSLError())
     end
 
@@ -492,7 +567,7 @@ function Base.:*(a::BigNum, b::BigNum)::BigNum
         r,
         a,
         b,
-        c) == 0
+        c) != 1
         throw(OpenSSLError())
     end
 
@@ -515,7 +590,7 @@ function Base.:/(a::BigNum, b::BigNum)::BigNum
         rm,
         a,
         b,
-        c) == 0
+        c) != 1
         throw(OpenSSLError())
     end
 
@@ -539,7 +614,7 @@ function Base.:%(a::BigNum, b::BigNum)::BigNum
         rm,
         a,
         b,
-        c) == 0
+        c) != 1
         throw(OpenSSLError())
     end
 
@@ -583,10 +658,6 @@ function free(rsa::RSA)
     rsa.rsa = C_NULL
     return nothing
 end
-
-const EVP_PKEY_RSA = 6 #NID_rsaEncryption
-#const EVP_PKEY_DSA = 6
-const RSA_F4 = 0x10001
 
 """
     Generate RSA key pair.
@@ -642,7 +713,7 @@ mutable struct EvpPKey
             Cint, (EvpPKey, Cint, RSA),
             evp_pkey,
             EVP_PKEY_RSA,
-            rsa) == 0
+            rsa) != 1
             throw(OpenSSLError())
         end
 
@@ -660,6 +731,25 @@ function free(evp_pkey::EvpPKey)
 
     evp_pkey.evp_pkey = C_NULL
     return nothing
+end
+
+function get_key_type(evp_pkey::EvpPKey)::EvpPKeyType
+    pkey_type = ccall(
+        (:EVP_PKEY_base_id, libcrypto),
+        EvpPKeyType,
+        (EvpPKey,),
+        evp_pkey)
+
+    return pkey_type
+end
+
+function Base.getproperty(evp_pkey::EvpPKey, name::Symbol)
+    if name === :key_type
+        return get_key_type(evp_pkey)
+    else
+        # fallback to getfield
+        return getfield(evp_pkey, name)
+    end
 end
 
 """
@@ -707,6 +797,13 @@ EVPEncNull()::EVPCipher = EVPCipher(ccall((:EVP_enc_null, libcrypto), Ptr{Cvoid}
 mutable struct EVPCipherContext
     evp_cipher_ctx::Ptr{Cvoid}
 
+    function EVPCipherContext(evp_cipher_ctx::Ptr{Cvoid})
+        evp_cipher_ctx = new(evp_cipher_ctx)
+        finalizer(free, evp_cipher_ctx)
+
+        return evp_cipher_ctx
+    end
+
     function EVPCipherContext()
         evp_cipher_ctx = ccall(
             (:EVP_CIPHER_CTX_new, libcrypto),
@@ -716,11 +813,10 @@ mutable struct EVPCipherContext
             throw(OpenSSLError())
         end
 
-        evp_cipher_ctx = new(evp_cipher_ctx)
-        finalizer(free, evp_cipher_ctx)
-
-        return evp_cipher_ctx
+        return EVPCipherContext(evp_cipher_ctx)
     end
+
+    #function EVPCipherContext()
 end
 
 function free(evp_cipher_ctx::EVPCipherContext)
@@ -799,7 +895,7 @@ function digest_init(evp_digest_ctx::EVPDigestContext, evp_digest::EVPDigest)
         (EVPDigestContext, EVPDigest, Ptr{Cvoid}),
         evp_digest_ctx,
         evp_digest,
-        C_NULL) == 0
+        C_NULL) != 1
         throw(OpenSSLError())
     end
 end
@@ -812,7 +908,7 @@ function digest_update(evp_digest_ctx::EVPDigestContext, in_data::Vector{UInt8})
             (EVPDigestContext, Ptr{UInt8}, Csize_t),
             evp_digest_ctx,
             pointer(in_data),
-            length(in_data)) == 0
+            length(in_data)) != 1
             throw(OpenSSLError())
         end
     end
@@ -829,7 +925,7 @@ function digest_final(evp_digest_ctx::EVPDigestContext)::Vector{UInt8}
             (EVPDigestContext, Ptr{UInt8}, Ptr{UInt32}),
             evp_digest_ctx,
             pointer(out_data),
-            pointer_from_objref(out_length)) == 0
+            pointer_from_objref(out_length)) != 1
             throw(OpenSSLError())
         end
     end
@@ -845,7 +941,7 @@ end
 function digest(evp_digest::EVPDigest, io::IO)
     md_ctx = EVPDigestContext()
 
-    digest_init(md_ctx, EVPMD5())
+    digest_init(md_ctx, evp_digest)
 
     while !eof(io)
         available_bytes = bytesavailable(io)
@@ -1356,7 +1452,7 @@ function add_entry(x509_name::X509Name, field::String, value::String)
         value,
         -1,
         -1,
-        0) == 0
+        0) != 1
         throw(OpenSSLError())
     end
 
@@ -1495,7 +1591,7 @@ function set_subject_name(x509_cert::X509Certificate, x509_name::X509Name)
         Cint,
         (X509Certificate, X509Name),
         x509_cert,
-        x509_name) == 0
+        x509_name) != 1
         throw(OpenSSLError())
     end
 end
@@ -1526,7 +1622,7 @@ function set_issuer_name(x509_cert::X509Certificate, x509_name::X509Name)
         (:X509_set_issuer_name, libcrypto),
         Cint, (X509Certificate, X509Name),
         x509_cert,
-        x509_name) == 0
+        x509_name) != 1
         throw(OpenSSLError())
     end
 end
@@ -1551,7 +1647,7 @@ function set_time_not_before(x509_cert::X509Certificate, asn1_time::Asn1Time)
         Cint,
         (X509Certificate, Asn1Time),
         x509_cert,
-        asn1_time) == 0
+        asn1_time) != 1
         throw(OpenSSLError())
     end
 end
@@ -1576,7 +1672,7 @@ function set_time_not_after(x509_cert::X509Certificate, asn1_time::Asn1Time)
         Cint,
         (X509Certificate, Asn1Time),
         x509_cert,
-        asn1_time) == 0
+        asn1_time) != 1
         throw(OpenSSLError())
     end
 end
@@ -1597,7 +1693,7 @@ function set_version(x509_cert::X509Certificate, version::Int)
         Cint,
         (X509Certificate, Cint),
         x509_cert,
-        version) == 0
+        version) != 1
         throw(OpenSSLError())
     end
 end
@@ -1621,7 +1717,7 @@ function set_public_key(x509_cert::X509Certificate, evp_pkey::EvpPKey)
         Cint,
         (X509Certificate, EvpPKey),
         x509_cert,
-        evp_pkey) == 0
+        evp_pkey) != 1
         throw(OpenSSLError())
     end
 end
@@ -1778,7 +1874,7 @@ function set_subject_name(x509_req::X509Request, x509_name::X509Name)
         Cint,
         (X509Request, X509Name),
         x509_req,
-        x509_name) == 0
+        x509_name) != 1
         throw(OpenSSLError())
     end
 end
@@ -1802,7 +1898,7 @@ function set_public_key(x509_req::X509Request, evp_pkey::EvpPKey)
         Cint,
         (X509Request, EvpPKey),
         x509_req,
-        evp_pkey) == 0
+        evp_pkey) != 1
         throw(OpenSSLError())
     end
 end
@@ -2578,7 +2674,7 @@ function Base.String(big_num::BigNum)
         Cint,
         (BIO, BigNum),
         bio,
-        big_num) == 0
+        big_num) != 1
         throw(OpenSSLError())
     end
 
@@ -2601,7 +2697,7 @@ function Base.String(asn1_time::Asn1Time)
         Cint,
         (BIO, Asn1Time),
         bio,
-        asn1_time) == 0
+        asn1_time) != 1
         throw(OpenSSLError())
     end
 
