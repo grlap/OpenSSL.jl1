@@ -833,12 +833,10 @@ end
 function encrypt_init(
     evp_cipher_ctx::EVPCipherContext,
     evp_cipher::EVPCipher,
-    sym_key::Vector{UInt8},
+    symetric_key::Vector{UInt8},
     init_vector::Vector{UInt8}=random_bytes(EVP_MAX_IV_LENGTH))
     # Initialize encryption context.
-    @show sym_key
-    @show init_vector
-    GC.@preserve sym_key init_vector begin
+    GC.@preserve symetric_key init_vector begin
         if ccall(
             (:EVP_EncryptInit_ex, libcrypto),
             Cint,
@@ -846,7 +844,7 @@ function encrypt_init(
             evp_cipher_ctx,
             evp_cipher,
             C_NULL,
-            pointer(sym_key),
+            pointer(symetric_key),
             pointer(init_vector)) != 1
             throw(OpenSSLError())
         end
@@ -862,17 +860,31 @@ function encrypt_init(
     end
 end
 
-function get_block_size(evp_cipher_ctx::EVPCipherContext)::Int32
-    return ccall(
+get_block_size(evp_cipher_ctx::EVPCipherContext)::Int32 = ccall(
         (:EVP_CIPHER_CTX_block_size, libcrypto),
         Int32,
         (EVPCipherContext,),
         evp_cipher_ctx)
-end
+
+get_key_length(evp_cipher_ctx::EVPCipherContext)::Int32 = ccall(
+        (:EVP_CIPHER_CTX_key_length, libcrypto),
+        Int32,
+        (EVPCipherContext,),
+        evp_cipher_ctx)
+
+get_init_vector_length(evp_cipher_ctx::EVPCipherContext)::Int32 = ccall(
+        (:EVP_CIPHER_CTX_iv_length, libcrypto),
+        Int32,
+        (EVPCipherContext,),
+        evp_cipher_ctx)
 
 function Base.getproperty(evp_cipher_ctx::EVPCipherContext, name::Symbol)
     if name === :block_size
         return get_block_size(evp_cipher_ctx)
+    elseif name === :key_length
+        return get_key_length(evp_cipher_ctx)
+    elseif name === :init_vector_length
+        return get_init_vector_length(evp_cipher_ctx)
     else
         # fallback to getfield
         return getfield(evp_cipher_ctx, name)
