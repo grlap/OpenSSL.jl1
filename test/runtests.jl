@@ -457,5 +457,7 @@ end
     sym_key = random_bytes(OpenSSL.EVP_MAX_KEY_LENGTH)
     encrypt_init(evp_cipher_ctx, EVPBlowFishCBC(), sym_key)
     @show evp_cipher_ctx.block_size
+    @show evp_cipher_ctx.key_length
+    @show evp_cipher_ctx.init_vector_length
     @test 1 == 1
 end
