@@ -453,5 +453,9 @@ end
 
 @testset "Encrypt" begin
     evp_cipher_ctx = EVPCipherContext()
+
+    sym_key = random_bytes(OpenSSL.EVP_MAX_KEY_LENGTH)
+    encrypt_init(evp_cipher_ctx, EVPBlowFishCBC(), sym_key)
+    @show evp_cipher_ctx.block_size
     @test 1 == 1
 end

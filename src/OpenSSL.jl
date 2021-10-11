@@ -6,6 +6,8 @@ using OpenSSL_jll
 using Sockets
 
 """
+    [ ] Encryption, decryption
+    [ ] X509 extension
     [x] Free BIO
     [x] Free BIOMethod
     [x] Free on BIOStream
@@ -23,8 +25,8 @@ export TLSv12ClientMethod, TLSv12ServerMethod,
     SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name,
     X509Certificate, X509Request, X509Store, X509Stack, P12Object,
     EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB,
-    EVPAES128CFB, EVPAES128OFB, EVPDigestContext, digest_init, digest_update, digest_final, digest,
-    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, EVPDSS1, random_bytes, rsa_generate_key, add_entry, 
+    EVPAES128CFB, EVPAES128OFB, EVPDigestContext, encrypt_init, digest_init, digest_update, digest_final, digest,
+    EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, EVPDSS1, random_bytes, rsa_generate_key, add_entry,
     sign_certificate, sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
     unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN, version
 
@@ -336,11 +338,11 @@ const EVP_MAX_BLOCK_LENGTH = 32
 
 @enum(EvpPKeyType::Int32,
     # define NID_undef 0
-    EVP_PKEY_NONE  = 0,
+    EVP_PKEY_NONE = 0,
     # define NID_rsaEncryption 6
     EVP_PKEY_RSA = 6,
     # define NID_rsa 19
-    EVP_PKEY_RSA2 = 19, 
+    EVP_PKEY_RSA2 = 19,
     # define NID_rsassaPss 912
     EVP_PKEY_RSA_PSS = 912,
     # define NID_dsa 116
@@ -815,8 +817,6 @@ mutable struct EVPCipherContext
 
         return EVPCipherContext(evp_cipher_ctx)
     end
-
-    #function EVPCipherContext()
 end
 
 function free(evp_cipher_ctx::EVPCipherContext)
@@ -828,6 +828,55 @@ function free(evp_cipher_ctx::EVPCipherContext)
 
     evp_cipher_ctx.evp_cipher_ctx = C_NULL
     return nothing
+end
+
+function encrypt_init(
+    evp_cipher_ctx::EVPCipherContext,
+    evp_cipher::EVPCipher,
+    sym_key::Vector{UInt8},
+    init_vector::Vector{UInt8}=random_bytes(EVP_MAX_IV_LENGTH))
+    # Initialize encryption context.
+    @show sym_key
+    @show init_vector
+    GC.@preserve sym_key init_vector begin
+        if ccall(
+            (:EVP_EncryptInit_ex, libcrypto),
+            Cint,
+            (EVPCipherContext, EVPCipher, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}),
+            evp_cipher_ctx,
+            evp_cipher,
+            C_NULL,
+            pointer(sym_key),
+            pointer(init_vector)) != 1
+            throw(OpenSSLError())
+        end
+
+        #if ccall(
+        #    (:EVP_CIPHER_CTX_set_key_length, libcrypto),
+        #    Cint,
+        #    (EVPCipherContext, Cint),
+        #    evp_cipher_ctx,
+        #    length(sym_key)) != 1
+        #    throw(OpenSSLError())
+        #end
+    end
+end
+
+function get_block_size(evp_cipher_ctx::EVPCipherContext)::Int32
+    return ccall(
+        (:EVP_CIPHER_CTX_block_size, libcrypto),
+        Int32,
+        (EVPCipherContext,),
+        evp_cipher_ctx)
+end
+
+function Base.getproperty(evp_cipher_ctx::EVPCipherContext, name::Symbol)
+    if name === :block_size
+        return get_block_size(evp_cipher_ctx)
+    else
+        # fallback to getfield
+        return getfield(evp_cipher_ctx, name)
+    end
 end
 
 """
@@ -2848,7 +2897,7 @@ function update_tls_error_state()
     end
 end
 
-function version(version_type::OpenSSLVersion = OPENSSL_VERSION)::String
+function version(; version_type::OpenSSLVersion=OPENSSL_VERSION)::String
     version = ccall(
         (:OpenSSL_version, libcrypto),
         Cstring,
