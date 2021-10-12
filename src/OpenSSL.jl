@@ -24,8 +24,9 @@ Error handling:
 export TLSv12ClientMethod, TLSv12ServerMethod,
     SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name,
     X509Certificate, X509Request, X509Store, X509Stack, P12Object,
-    EVPCipherContext, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB, EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB,
-    EVPAES128CFB, EVPAES128OFB, EVPDigestContext, encrypt_init, digest_init, digest_update, digest_final, digest,
+    EVPCipherContext, EVPEncNull, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB,
+    EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, encrypt_init, cipher,
+    EVPDigestContext, decrypt_init, digest_init, digest_update, digest_final, digest,
     EVPMDNull, EVPMD2, EVPMD5, EVPSHA1, EVPDSS1, random_bytes, rsa_generate_key, add_entry,
     sign_certificate, sign_request, adjust, add_cert, eof, isreadable, iswritable, bytesavailable, read,
     unsafe_write, connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN, version
@@ -761,6 +762,8 @@ mutable struct EVPCipher
     evp_cipher::Ptr{Cvoid}
 end
 
+EVPEncNull()::EVPCipher = EVPCipher(ccall((:EVP_enc_null, libcrypto), Ptr{Cvoid}, ()))
+
 """
     Basic Block Cipher Modes:
     - ECB Electronic Code Block
@@ -830,15 +833,15 @@ function free(evp_cipher_ctx::EVPCipherContext)
     return nothing
 end
 
-function encrypt_init(
+function decrypt_init(
     evp_cipher_ctx::EVPCipherContext,
     evp_cipher::EVPCipher,
     symetric_key::Vector{UInt8},
-    init_vector::Vector{UInt8}=random_bytes(EVP_MAX_IV_LENGTH))
+    init_vector::Vector{UInt8})
     # Initialize encryption context.
     GC.@preserve symetric_key init_vector begin
         if ccall(
-            (:EVP_EncryptInit_ex, libcrypto),
+            (:EVP_DecryptInit_ex, libcrypto),
             Cint,
             (EVPCipherContext, EVPCipher, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}),
             evp_cipher_ctx,
@@ -860,23 +863,109 @@ function encrypt_init(
     end
 end
 
+function encrypt_init(
+    evp_cipher_ctx::EVPCipherContext,
+    evp_cipher::EVPCipher,
+    symetric_key::Vector{UInt8},
+    init_vector::Vector{UInt8})
+    # Initialize encryption context.
+    GC.@preserve symetric_key init_vector begin
+        if ccall(
+            (:EVP_EncryptInit_ex, libcrypto),
+            Cint,
+            (EVPCipherContext, EVPCipher, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}),
+            evp_cipher_ctx,
+            evp_cipher,
+            C_NULL,
+            pointer(symetric_key),
+            pointer(init_vector)) != 1
+            throw(OpenSSLError())
+        end
+    end
+end
+
+function cipher_update(evp_cipher_ctx::EVPCipherContext, in_data::Vector{UInt8})::Vector{UInt8}
+    in_length = length(in_data)
+
+    block_size = get_block_size(evp_cipher_ctx)
+    enc_length = Int((in_length + block_size - 1) / block_size * block_size)
+
+    out_data = Vector{UInt8}(undef, enc_length)
+    out_length = Ref{UInt32}(0)
+
+    GC.@preserve in_data out_data out_length begin
+        if ccall(
+            (:EVP_CipherUpdate, libcrypto),
+            Cint,
+            (EVPCipherContext, Ptr{UInt8}, Ptr{Int32}, Ptr{UInt8}, Cint),
+            evp_cipher_ctx,
+            pointer(out_data),
+            pointer_from_objref(out_length),
+            pointer(in_data),
+            in_length) != 1
+            throw(OpenSSLError())
+        end
+    end
+
+    @show out_length.x
+
+    resize!(out_data, out_length.x)
+
+    return out_data
+end
+
+function cipher_final(evp_cipher_ctx::EVPCipherContext)::Vector{UInt8}
+    block_size = get_block_size(evp_cipher_ctx)
+
+    out_data = Vector{UInt8}(undef, block_size)
+    out_length = Ref{Int32}(0)
+
+    GC.@preserve out_data out_length begin
+        if ccall(
+            (:EVP_CipherFinal_ex, libcrypto),
+            Cint,
+            (EVPCipherContext, Ptr{UInt8}, Ptr{Int32}),
+            evp_cipher_ctx,
+            pointer(out_data),
+            pointer_from_objref(out_length)) != 1
+            throw(OpenSSLError())
+        end
+    end
+
+    resize!(out_data, out_length.x)
+
+    return out_data
+end
+
+function cipher(evp_cipher_ctx::EVPCipherContext, in_io::IO, out_io::IO)
+    while !eof(in_io)
+        available_bytes = bytesavailable(in_io)
+        in_data = read(in_io, available_bytes)
+        write(out_io, cipher_update(evp_cipher_ctx, in_data))
+    end
+
+    write(out_io, cipher_final(evp_cipher_ctx))
+
+    return seek(out_io, 0)
+end
+
 get_block_size(evp_cipher_ctx::EVPCipherContext)::Int32 = ccall(
-        (:EVP_CIPHER_CTX_block_size, libcrypto),
-        Int32,
-        (EVPCipherContext,),
-        evp_cipher_ctx)
+    (:EVP_CIPHER_CTX_block_size, libcrypto),
+    Int32,
+    (EVPCipherContext,),
+    evp_cipher_ctx)
 
 get_key_length(evp_cipher_ctx::EVPCipherContext)::Int32 = ccall(
-        (:EVP_CIPHER_CTX_key_length, libcrypto),
-        Int32,
-        (EVPCipherContext,),
-        evp_cipher_ctx)
+    (:EVP_CIPHER_CTX_key_length, libcrypto),
+    Int32,
+    (EVPCipherContext,),
+    evp_cipher_ctx)
 
 get_init_vector_length(evp_cipher_ctx::EVPCipherContext)::Int32 = ccall(
-        (:EVP_CIPHER_CTX_iv_length, libcrypto),
-        Int32,
-        (EVPCipherContext,),
-        evp_cipher_ctx)
+    (:EVP_CIPHER_CTX_iv_length, libcrypto),
+    Int32,
+    (EVPCipherContext,),
+    evp_cipher_ctx)
 
 function Base.getproperty(evp_cipher_ctx::EVPCipherContext, name::Symbol)
     if name === :block_size

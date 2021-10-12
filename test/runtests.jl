@@ -452,12 +452,26 @@ end
 end
 
 @testset "Encrypt" begin
-    evp_cipher_ctx = EVPCipherContext()
-
     sym_key = random_bytes(OpenSSL.EVP_MAX_KEY_LENGTH)
-    encrypt_init(evp_cipher_ctx, EVPBlowFishCBC(), sym_key)
-    @show evp_cipher_ctx.block_size
-    @show evp_cipher_ctx.key_length
-    @show evp_cipher_ctx.init_vector_length
+    init_vec = random_bytes(OpenSSL.EVP_MAX_IV_LENGTH)
+
+    enc_evp_cipher_ctx = EVPCipherContext()
+    encrypt_init(enc_evp_cipher_ctx, EVPBlowFishCBC(), sym_key, init_vec)
+
+    dec_evp_cipher_ctx = EVPCipherContext()
+    decrypt_init(dec_evp_cipher_ctx, EVPBlowFishCBC(), sym_key, init_vec)
+
+    in_data = IOBuffer("ala ma kota 4i4pi34i45434341234567890abcd_")
+    enc_data = IOBuffer()
+
+    cipher(enc_evp_cipher_ctx, in_data, enc_data)
+    @show String(read(enc_data))
+    seek(enc_data, 0)
+
+    dec_data = IOBuffer()
+    cipher(dec_evp_cipher_ctx, enc_data, dec_data)
+    @show String(read(dec_data))
+    seek(dec_data, 0)
+
     @test 1 == 1
 end
