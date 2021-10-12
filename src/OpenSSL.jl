@@ -23,7 +23,7 @@ Error handling:
 
 export TLSv12ClientMethod, TLSv12ServerMethod,
     SSLStream, BigNum, EvpPKey, RSA, Asn1Time, X509Name,
-    X509Certificate, X509Request, X509Store, X509Stack, P12Object,
+    X509Certificate, X509Request, X509Store, X509Extension, StackOf, P12Object,
     EVPCipherContext, EVPEncNull, EVPBlowFishCBC, EVPBlowFishECB, EVPBlowFishCFB,
     EVPBlowFishOFB, EVPAES128CBC, EVPAES128ECB, EVPAES128CFB, EVPAES128OFB, encrypt_init, cipher,
     EVPDigestContext, decrypt_init, digest_init, digest_update, digest_final, digest,
@@ -1610,6 +1610,47 @@ function add_entry(x509_name::X509Name, field::String, value::String)
 end
 
 """
+    X509_EXTENSION
+"""
+mutable struct X509Extension
+    x509_ext::Ptr{Cvoid}
+
+    function X509Extension(x509_ext::Ptr{Cvoid})
+        x509_ext = new(x509_ext)
+
+        finalizer(free, x509_ext)
+        return x509_ext
+    end
+
+    function X509Extension(name::String, value::String)
+        x509_ext = ccall(
+            (:X509V3_EXT_conf, libcrypto),
+            Ptr{Cvoid},
+            (Ptr{Cvoid}, Ptr{Cvoid}, Cstring, Cstring),
+            C_NULL,
+            C_NULL,
+            name,
+            value)
+        if x509_ext == C_NULL
+            throw(OpenSSLError())
+        end
+
+        return X509Extension(x509_ext)
+    end
+end
+
+function free(x509_ext::X509Extension)
+    ccall(
+        (:X509_EXTENSION_free, libcrypto),
+        Cvoid,
+        (X509Extension,),
+        x509_ext)
+
+    x509_ext.x509_ext = C_NULL
+    return nothing
+end
+
+"""
     X509 Certificate.
 """
 mutable struct X509Certificate
@@ -1710,6 +1751,18 @@ function sign_certificate(x509_cert::X509Certificate, evp_pkey::EvpPKey)
         (X509Certificate, EvpPKey),
         x509_cert,
         evp_pkey) != 1
+        throw(OpenSSLError())
+    end
+end
+
+function add(x509_cert::X509Certificate, x509_ext::X509Extension)
+    if ccall(
+        (:X509_add_ext, libcrypto),
+        Cint,
+        (X509Certificate, X509Extension, Cint),
+        x509_cert,
+        x509_ext,
+        -1) != 1
         throw(OpenSSLError())
     end
 end
@@ -2124,40 +2177,66 @@ function add_cert(x509_store::X509Store, x509_cert::X509Certificate)
 end
 
 """
-    X509 certificate stack.
+    Stack.
 """
-mutable struct X509Stack
-    x509_stack::Ptr{Cvoid}
+mutable struct StackOf{T}
+    sk::Ptr{Cvoid}
 
-    function X509Stack(x509_stack::Ptr{Cvoid})
-        x509_stack = new(x509_stack)
+    function StackOf{T}(sk::Ptr{Cvoid}) where {T}
+        stack_of = new(sk)
 
-        finalizer(free, x509_stack)
-        return x509_stack
+        finalizer(free, stack_of)
+        return stack_of
     end
 
-    function X509Stack()
-        x509_stack = ccall(
+    function StackOf{T}() where {T}
+        sk = ccall(
             (:OPENSSL_sk_new_null, libcrypto),
             Ptr{Cvoid},
             ())
-        if x509_stack == C_NULL
+        if sk == C_NULL
             throw(OpenSSLError())
         end
 
-        return X509Stack(x509_stack)
+        return StackOf{T}(sk)
     end
 end
 
-function free(x509_stack::X509Stack)
+function free(stack_of::StackOf{T}) where {T}
     ccall(
         (:OPENSSL_sk_free, libcrypto),
         Cvoid,
-        (X509Stack,),
-        x509_stack)
+        (StackOf{T},),
+        stack_of)
 
-    x509_stack.x509_stack = C_NULL
+    stack_of.sk = C_NULL
     return nothing
+end
+
+function push(stack_of::StackOf{T}, element::T) where {T}
+    count = ccall(
+        (:OPENSSL_sk_push, libcrypto),
+        Cint,
+        (StackOf{T}, T),
+        stack_of,
+        element)
+
+    ##TODO upref?
+    ## example: X509_up_ref
+
+    if count == 0
+        throw(OpenSSLError())
+    end
+
+    return count
+end
+
+function Base.length(stack_of::StackOf{T}) where {T}
+    return ccall(
+        (:OPENSSL_sk_num, libcrypto),
+        Cint,
+        (StackOf{T},),
+        stack_of)
 end
 
 """
@@ -2239,12 +2318,12 @@ end
 function unpack(p12_object::P12Object)
     evp_pkey::EvpPKey = EvpPKey(C_NULL)
     x509_cert::X509Certificate = X509Certificate(C_NULL)
-    x509_stack::X509Stack = X509Stack(C_NULL)
+    x509_stack::StackOf{X509Certificate} = StackOf{X509Certificate}(C_NULL)
 
     if ccall(
         (:PKCS12_parse, libcrypto),
         Cint,
-        (P12Object, Cstring, Ref{EvpPKey}, Ref{X509Certificate}, Ref{X509Stack}),
+        (P12Object, Cstring, Ref{EvpPKey}, Ref{X509Certificate}, Ref{StackOf{X509Certificate}}),
         p12_object,
         C_NULL,
         evp_pkey,
@@ -2872,6 +2951,29 @@ time_not_after: $(x509_cert.time_not_after)""")
     return String(read(io))
 end
 
+function Base.String(x509_ext::X509Extension)
+    io = IOBuffer()
+
+    bio = BIO(BIOMethod_mem())
+
+    _ = ccall(
+        (:X509V3_EXT_print, libcrypto),
+        Cint,
+        (BIO, X509Extension, Cint, Ptr{Cvoid}),
+        bio,
+        x509_ext,
+        0,
+        C_NULL)
+
+    update_tls_error_state()
+
+    result = String(bio_get_mem_data(bio))
+
+    free(bio)
+
+    return result
+end
+
 function Base.String(x509_cert::X509Request)
     io = IOBuffer()
 
@@ -2929,6 +3031,8 @@ Base.show(io::IO, asn1_time::Asn1Time) = write(io, String(asn1_time))
 Base.show(io::IO, x509_name::X509Name) = write(io, String(x509_name))
 
 Base.show(io::IO, x509_cert::X509Certificate) = write(io, String(x509_cert))
+
+Base.show(io::IO, x509_ext::X509Extension) = write(io, String(x509_ext))
 
 Base.show(io::IO, x509_req::X509Request) = write(io, String(x509_req))
 

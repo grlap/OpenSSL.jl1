@@ -216,6 +216,9 @@ end
     adjust(x509_certificate.time_not_before, Second(0))
     adjust(x509_certificate.time_not_after, Year(1))
 
+    ext = X509Extension("subjectAltName", "DNS:localhost")
+    OpenSSL.add(x509_certificate, ext)
+
     sign_certificate(x509_certificate, evp_pkey)
 
     iob = IOBuffer()
@@ -223,6 +226,7 @@ end
 
     seek(iob, 0)
     cert_pem = String(read(iob))
+    @show cert_pem
 
     x509_certificate2 = X509Certificate(cert_pem)
 
@@ -234,15 +238,19 @@ end
 
     @test x509_string == x509_string2
 
-    p12 = P12Object(evp_pkey, x509_certificate)
-    @show p12
-    io = IOBuffer()
-    write(io, p12)
+    p12_object = P12Object(evp_pkey, x509_certificate)
+    #@show p12
+    #io = IOBuffer()
+    #write(io, p12)
 
-    OpenSSL.unpack(p12)
+    open("ca.pem", "a") do io
+        write(io, x509_certificate)
+    end
 
-    seek(io, 0)
-    @show "p12:" String(read(io))
+    OpenSSL.unpack(p12_object)
+
+    #seek(io, 0)
+    # @show "p12:" String(read(io))
 end
 
 #https://mariadb.com/docs/security/encryption/in-transit/create-self-signed-certificates-keys-openssl/
@@ -286,9 +294,8 @@ end
 
     sign_request(x509_request, evp_pkey)
 
-    @show x509_request.public_key
-
-    @show x509_request
+    # @show x509_request.public_key
+    # @show x509_request
 
     # Create a certificate.
     x509_certificate = X509Certificate()
@@ -305,7 +312,13 @@ end
     adjust(x509_certificate.time_not_after, Year(1))
 
     sign_certificate(x509_certificate, evp_pkey_ca)
-    @show x509_certificate
+    # @show x509_certificate
+
+    st = StackOf{X509Certificate}()
+    @show length(st)
+    @show OpenSSL.push(st, root_certificate)
+    @show OpenSSL.push(st, x509_certificate)
+    @show length(st)
 end
 
 @testset "ErrorTaskTLS" begin
