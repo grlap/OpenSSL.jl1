@@ -488,3 +488,40 @@ end
 
     @test 1 == 1
 end
+
+@testset "StackOf{X509Extension}" begin
+    ext1 = X509Extension("subjectAltName", "DNS:openssl.jl.com")
+    ext2 = X509Extension("keyUsage", "digitalSignature, keyEncipherment, keyAgreement")
+    ext3 = X509Extension("basicConstraints", "CA:FALSE")
+
+    st = StackOf{X509Extension}()
+    OpenSSL.push(st, ext1)
+    OpenSSL.push(st, ext2)
+    OpenSSL.push(st, ext3)
+
+    @test String(ext1) == "DNS:openssl.jl.com"
+    @test String(ext2) == "Digital Signature, Key Encipherment, Key Agreement"
+    @test String(ext3) == "CA:FALSE"
+
+    finalize(ext1)
+    finalize(ext2)
+    finalize(ext3)
+
+    @test length(st) == 3
+
+    ext_1 = OpenSSL.pop(st)
+    ext_2 = OpenSSL.pop(st)
+    ext_3 = OpenSSL.pop(st)
+
+    @test length(st) == 0
+
+    @test String(ext_1) == "CA:FALSE"
+    @test String(ext_2) == "Digital Signature, Key Encipherment, Key Agreement"
+    @test String(ext_3) == "DNS:openssl.jl.com"
+
+    finalize(ext_1)
+    finalize(ext_2)
+    finalize(ext_3)
+
+    finalize(st)
+end

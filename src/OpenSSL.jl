@@ -1651,6 +1651,22 @@ function free(x509_ext::X509Extension)
 end
 
 """
+    X509Extension does not support up ref. Duplicate the extension instead.
+"""
+function up_ref(x509_ext::X509Extension)::Ptr{Cvoid}
+    x509_ext = ccall(
+        (:X509_EXTENSION_dup, libcrypto),
+        Ptr{Cvoid},
+        (X509Extension,),
+        x509_ext)
+    if x509_ext == C_NULL
+        throw(OpenSSLError())
+    end
+
+    return x509_ext
+end
+
+"""
     X509 Certificate.
 """
 mutable struct X509Certificate
@@ -1710,6 +1726,16 @@ function free(x509_cert::X509Certificate)
 
     x509_cert.x509 = C_NULL
     return nothing
+end
+
+function up_ref(x509_cert::X509Certificate)::Ptr{Cvoid}
+    _ = ccall(
+        (:X509_up_ref, libcrypto),
+        Cint,
+        (X509Certificate,),
+        x509_cert)
+
+    return x509_cert.x509
 end
 
 function Base.write(io::IO, x509_cert::X509Certificate)
@@ -2217,18 +2243,25 @@ function push(stack_of::StackOf{T}, element::T) where {T}
     count = ccall(
         (:OPENSSL_sk_push, libcrypto),
         Cint,
-        (StackOf{T}, T),
+        (StackOf{T}, Ptr{Cvoid}),
         stack_of,
-        element)
-
-    ##TODO upref?
-    ## example: X509_up_ref
+        up_ref(element))
 
     if count == 0
         throw(OpenSSLError())
     end
 
     return count
+end
+
+function pop(stack_of::StackOf{T}) where {T}
+    ptr = ccall(
+        (:OPENSSL_sk_pop, libcrypto),
+        Ptr{Cvoid},
+        (StackOf{T},),
+        stack_of)
+
+    return T(ptr)
 end
 
 function Base.length(stack_of::StackOf{T}) where {T}
@@ -2952,6 +2985,10 @@ time_not_after: $(x509_cert.time_not_after)""")
 end
 
 function Base.String(x509_ext::X509Extension)
+    if x509_ext.x509_ext == C_NULL
+        return "C_NULL"
+    end
+
     io = IOBuffer()
 
     bio = BIO(BIOMethod_mem())
