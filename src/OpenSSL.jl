@@ -806,8 +806,6 @@ function cipher_update(evp_cipher_ctx::EvpCipherContext, in_data::Vector{UInt8})
         end
     end
 
-    @show out_length.x
-
     resize!(out_data, out_length.x)
 
     return out_data
@@ -2841,7 +2839,7 @@ function force_read_buffer(ssl_stream::SSLStream)
         bio_stream_set_data(bio_read_stream)
         bio_stream_set_data(bio_write_stream)
 
-        has_pending = ccall(
+        _ = ccall(
             (:SSL_has_pending, libssl),
             Cint,
             (SSL,),
