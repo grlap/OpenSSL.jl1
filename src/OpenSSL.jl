@@ -2913,12 +2913,13 @@ end
 """
     Read from the SSL stream.
 """
-function Base.read(ssl_stream::SSLStream, in_length::Int32)::Vector{UInt8}
-    return read(ssl_stream)
-end
+Base.read(ssl_stream::SSLStream, in_length::Int32)::Vector{UInt8} = read(ssl_stream)
 
 function Base.read(ssl_stream::SSLStream)::Vector{UInt8}
     lock(ssl_stream.lock) do
+        # Force first read, that will update the pending bytes.
+        force_read_buffer(ssl_stream)
+
         bio_read_stream = ssl_stream.bio_read_stream
         bio_write_stream = ssl_stream.bio_write_stream
 
@@ -2926,10 +2927,7 @@ function Base.read(ssl_stream::SSLStream)::Vector{UInt8}
             bio_stream_set_data(bio_read_stream)
             bio_stream_set_data(bio_write_stream)
 
-            # Force first read, that will update the pending bytes.
-            force_read_buffer(ssl_stream)
-
-            has_pending = ccall(
+            _ = ccall(
                 (:SSL_has_pending, libssl),
                 Cint,
                 (SSL,),
@@ -2967,8 +2965,6 @@ function Base.read(ssl_stream::SSLStream)::Vector{UInt8}
 end
 
 function Base.bytesavailable(ssl_stream::SSLStream)::Cint
-    force_read_buffer(ssl_stream)
-
     bio_read_stream = ssl_stream.bio_read_stream
     bio_write_stream = ssl_stream.bio_write_stream
 
@@ -2976,7 +2972,7 @@ function Base.bytesavailable(ssl_stream::SSLStream)::Cint
         bio_stream_set_data(bio_read_stream)
         bio_stream_set_data(bio_write_stream)
 
-        has_pending = ccall(
+        _ = ccall(
             (:SSL_has_pending, libssl),
             Cint,
             (SSL,),
@@ -2998,11 +2994,12 @@ function Base.eof(ssl_stream::SSLStream)::Bool
     bio_read_stream = ssl_stream.bio_read_stream
     bio_write_stream = ssl_stream.bio_write_stream
 
+    # Force first read, that will update the pending bytes.
+    force_read_buffer(ssl_stream)
+
     GC.@preserve bio_read_stream bio_write_stream begin
         bio_stream_set_data(bio_read_stream)
         bio_stream_set_data(bio_write_stream)
-
-        force_read_buffer(ssl_stream)
 
         has_pending = ccall(
             (:SSL_has_pending, libssl),
