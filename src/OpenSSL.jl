@@ -28,10 +28,10 @@ export TLSv12ClientMethod, TLSv12ServerMethod,
     X509Request, X509Store, X509Attribute, X509Extension, P12Object, EvpDigestContext, EvpCipherContext,
     EvpEncNull, EvpBlowFishCBC, EVPBlowFishECB, EvpBlowFishCFB, EvpBlowFishOFB, EvpAES128CBC,
     EvpAES128ECB, EvpAES128CFB, EvpAES128OFB, EvpMDNull, EvpMD2, EvpMD5, EvpSHA1, EvpDSS1,
-    encrypt_init, cipher, add_extension, add_extensions, decrypt_init, digest_init, digest_update,
-    digest_final, digest, random_bytes, rsa_generate_key, dsa_generate_key, add_entry, sign_certificate,
-    sign_request, adjust, add_cert, unpack, eof, isreadable, iswritable, bytesavailable, read, unsafe_write,
-    connect, get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN, version
+    encrypt_init, cipher, add_extension, add_extensions, decrypt_init, digest_init, digest_update, digest_final,
+    digest, random_bytes, rsa_generate_key, dsa_generate_key, add_entry, sign_certificate, sign_request, adjust,
+    add_cert, unpack, eof, isreadable, iswritable, bytesavailable, read, unsafe_write, connect,
+    get_peer_certificate, free, HTTP2_ALPN, UPDATE_HTTP2_ALPN, version
 
 const Option{T} = Union{Nothing,T} where {T}
 
@@ -1774,7 +1774,7 @@ function free(stack_of::StackOf{T}) where {T}
     return nothing
 end
 
-function push(stack_of::StackOf{T}, element::T) where {T}
+function Base.push!(stack_of::StackOf{T}, element::T) where {T}
     count = ccall(
         (:OPENSSL_sk_push, libcrypto),
         Cint,
@@ -1789,7 +1789,7 @@ function push(stack_of::StackOf{T}, element::T) where {T}
     return count
 end
 
-function pop(stack_of::StackOf{T}) where {T}
+function Base.pop!(stack_of::StackOf{T}) where {T}
     ptr = ccall(
         (:OPENSSL_sk_pop, libcrypto),
         Ptr{Cvoid},

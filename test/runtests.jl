@@ -129,7 +129,7 @@ end
 
     foreach(2:length(certs_pem)) do i
         x509_cert = X509Certificate(certs_pem[i])
-        OpenSSL.push(x509_certificates, x509_cert)
+        push!(x509_certificates, x509_cert)
         finalize(x509_cert)
         nothing
     end
@@ -142,11 +142,11 @@ end
     n2 = BigNum(0x8)
 
     big_nums = StackOf{BigNum}()
-    OpenSSL.push(big_nums, n1)
-    OpenSSL.push(big_nums, n2)
+    push!(big_nums, n1)
+    push!(big_nums, n2)
 
-    _n1 = OpenSSL.pop(big_nums)
-    _n2 = OpenSSL.pop(big_nums)
+    _n1 = pop!(big_nums)
+    _n2 = pop!(big_nums)
 
     @test _n1 == n2
     @test _n1 == n2
@@ -348,7 +348,7 @@ end
     x509_exts = StackOf{X509Extension}()
 
     ext = X509Extension("subjectAltName", "DNS:localhost")
-    OpenSSL.push(x509_exts, ext)
+    push!(x509_exts, ext)
     add_extensions(x509_request, x509_exts)
     finalize(ext)
 
@@ -366,7 +366,7 @@ end
 
     x509_exts = x509_request.extensions
 
-    ext = OpenSSL.pop(x509_exts)
+    ext = pop!(x509_exts)
 
     add_extension(x509_certificate, ext)
     add_extension(x509_certificate, X509Extension("keyUsage", "digitalSignature, nonRepudiation, keyEncipherment"))
@@ -487,9 +487,9 @@ end
     ext3 = X509Extension("basicConstraints", "CA:FALSE")
 
     st = StackOf{X509Extension}()
-    OpenSSL.push(st, ext1)
-    OpenSSL.push(st, ext2)
-    OpenSSL.push(st, ext3)
+    push!(st, ext1)
+    push!(st, ext2)
+    push!(st, ext3)
 
     @test String(ext1) == "DNS:openssl.jl.com"
     @test String(ext2) == "Digital Signature, Key Encipherment, Key Agreement"
@@ -501,9 +501,9 @@ end
 
     @test length(st) == 3
 
-    ext_1 = OpenSSL.pop(st)
-    ext_2 = OpenSSL.pop(st)
-    ext_3 = OpenSSL.pop(st)
+    ext_1 = pop!(st)
+    ext_2 = pop!(st)
+    ext_3 = pop!(st)
 
     @test length(st) == 0
 
@@ -538,6 +538,11 @@ end
 
 @testset "DSA" begin
     dsa = dsa_generate_key()
+end
+
+@testset "X509Attribute" begin
+    attr = X509Attribute()
+    free(attr)
 end
 
 @testset "SSLServer" begin
