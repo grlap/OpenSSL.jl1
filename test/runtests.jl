@@ -137,6 +137,21 @@ end
     free(x509_certificates)
 end
 
+@testset "StackOf{BigNum}" begin
+    n1 = BigNum(0x4)
+    n2 = BigNum(0x8)
+
+    big_nums = StackOf{BigNum}()
+    OpenSSL.push(big_nums, n1)
+    OpenSSL.push(big_nums, n2)
+
+    _n1 = OpenSSL.pop(big_nums)
+    _n2 = OpenSSL.pop(big_nums)
+
+    @test _n1 == n2
+    @test _n1 == n2
+end
+
 @testset "X509Store" begin
     file_handle = open(MozillaCACerts_jll.cacert)
     file_content = String(read(file_handle))
@@ -429,12 +444,14 @@ end
 
     p12_object = P12Object(evp_pkey, x509_certificate)
 
-    _evp_key, _x509_certificate, _x509_ca_stack = unpack(p12_object)
+    _evp_pkey, _x509_certificate, _x509_ca_stack = unpack(p12_object)
 
-    @assert _evp_key.key_type == evp_pkey.key_type
+    @test _evp_pkey == evp_pkey
+    @test _evp_pkey.key_type == evp_pkey.key_type
 
-    @assert _x509_certificate.subject_name == x509_certificate.subject_name
-    @assert _x509_certificate.issuer_name == x509_certificate.issuer_name
+    @test _x509_certificate == x509_certificate
+    @test _x509_certificate.subject_name == x509_certificate.subject_name
+    @test _x509_certificate.issuer_name == x509_certificate.issuer_name
 end
 
 @testset "Encrypt" begin
@@ -447,7 +464,8 @@ end
     dec_evp_cipher_ctx = EvpCipherContext()
     decrypt_init(dec_evp_cipher_ctx, EvpBlowFishCBC(), sym_key, init_vec)
 
-    in_data = IOBuffer("ala ma kota 4i4pi34i45434341234567890abcd_")
+    in_string = "OpenSSL Julia"
+    in_data = IOBuffer(in_string)
     enc_data = IOBuffer()
 
     cipher(enc_evp_cipher_ctx, in_data, enc_data)
@@ -457,10 +475,10 @@ end
 
     dec_data = IOBuffer()
     cipher(dec_evp_cipher_ctx, enc_data, dec_data)
-    @show String(take!(dec_data))
-    seek(dec_data, 0)
+    out_data = take!(dec_data)
+    out_string = String(out_data)
 
-    @test 1 == 1
+    @test in_string == out_string
 end
 
 @testset "StackOf{X509Extension}" begin
@@ -506,11 +524,16 @@ end
     io = IOBuffer()
     write(io, evp_pkey)
 
-    seek(io, 0)
-    pem = String(read(io))
-    @show pem
+    pkey_pem = String(take!(io))
+
+    @test startswith(pkey_pem, "-----BEGIN PRIVATE KEY-----")
+
+    _evp_pkey = EvpPKey(pkey_pem)
+
+    @test _evp_pkey == evp_pkey
 
     free(evp_pkey)
+    free(_evp_pkey)
 end
 
 @testset "DSA" begin
