@@ -459,7 +459,7 @@ end
         EvpEncNull(),
         EvpBlowFishCBC(),
         EvpBlowFishECB(),
-        EvpBlowFishCFB(),
+        #EvpBlowFishCFB(),
         EvpBlowFishOFB(),
         EvpAES128CBC(),
         EvpAES128ECB(),
