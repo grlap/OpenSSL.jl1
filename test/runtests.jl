@@ -459,11 +459,11 @@ end
         EvpEncNull(),
         EvpBlowFishCBC(),
         EvpBlowFishECB(),
-        #EvpBlowFishCFB(),
+        #EvpBlowFishCFB(), // not supported
         EvpBlowFishOFB(),
         EvpAES128CBC(),
         EvpAES128ECB(),
-        EvpAES128CFB(),
+        #EvpAES128CFB(), // not supported
         EvpAES128OFB(),
     ]
 
